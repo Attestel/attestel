@@ -1,0 +1,40 @@
+{
+  "name": "all-flat",
+  "description": "Never in the market. No trade, no cost, no return \u2014 equity must not move.",
+  "inputs": {
+    "costBps": 6.0,
+    "timeframe": "1D",
+    "retNext": [
+      0.01,
+      -0.02,
+      0.03
+    ],
+    "positions": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "expected": {
+    "net": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "equity": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "totalReturn": 0.0,
+    "mean": 0.0,
+    "std": 0.0,
+    "numTrades": 0,
+    "turnover": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "tolerance": 1e-09
+}

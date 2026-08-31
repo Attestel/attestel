@@ -1,0 +1,55 @@
+{
+  "name": "long-hold-real-costs",
+  "description": "A five-bar hold at the shipped 6 bps assumption. Turnover is charged on the open and the close and NOWHERE in between; this is the scenario that pins 'no intra-hold rebalancing'.",
+  "inputs": {
+    "costBps": 6.0,
+    "timeframe": "1D",
+    "retNext": [
+      0.012,
+      -0.008,
+      0.004,
+      0.021,
+      -0.015,
+      0.007
+    ],
+    "positions": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      0.0
+    ]
+  },
+  "expected": {
+    "net": [
+      0.0114,
+      -0.008,
+      0.004,
+      0.021,
+      -0.015,
+      -0.0006
+    ],
+    "equity": [
+      1.0114,
+      1.0033088,
+      1.0073220352,
+      1.028475797939,
+      1.01304866097,
+      1.012440831774
+    ],
+    "totalReturn": 0.012440831774,
+    "mean": 0.002133333333,
+    "std": 0.01189547066,
+    "numTrades": 1,
+    "turnover": [
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  },
+  "tolerance": 1e-09
+}

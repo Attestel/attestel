@@ -1,0 +1,85 @@
+# ─────────────────────────────────────────────────────────────
+# Secrets & environment — NEVER commit real keys.
+# .env.example templates ARE committed (negated below).
+# ─────────────────────────────────────────────────────────────
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Credentials / certs
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+id_rsa*
+*_rsa
+credentials.json
+service-account*.json
+
+# ─────────────────────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# ─────────────────────────────────────────────────────────────
+# Node / web
+# ─────────────────────────────────────────────────────────────
+node_modules/
+dist/
+build/
+.vite/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# ─────────────────────────────────────────────────────────────
+# Go — compiled service binaries (built next to their package)
+# ─────────────────────────────────────────────────────────────
+/gateway/gateway
+/alerts/alerts
+/journal/journal
+/paper/paper
+/feedback/feedback
+/auth/auth
+*.exe
+*.test
+*.out
+
+# ─────────────────────────────────────────────────────────────
+# Runtime state / generated data (mounted volumes; not source)
+# ─────────────────────────────────────────────────────────────
+data/
+**/data/
+*.db
+*.db-shm
+*.db-wal
+*.pkl
+output/
+outputs/
+
+# ─────────────────────────────────────────────────────────────
+# Tooling / editor / OS junk
+# ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Working backups created during edits (never commit these)
+*.bak
+*.bak-*
+.backups-*/

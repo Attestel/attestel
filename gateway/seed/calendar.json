@@ -1,0 +1,24 @@
+{
+  "note": "Seed economic calendar — FOMC decision dates plus the approximate monthly/quarterly cadence of the market-moving BLS/BEA/Census releases. Public-domain schedule; badged 'seed' in the UI. FOMC dates should be reconciled with the Fed's published calendar; live release dates come from FRED when FRED_API_KEY is set.",
+  "fomc": [
+    { "date": "2026-07-29", "name": "FOMC rate decision", "importance": "high" },
+    { "date": "2026-09-16", "name": "FOMC rate decision", "importance": "high" },
+    { "date": "2026-10-28", "name": "FOMC rate decision", "importance": "high" },
+    { "date": "2026-12-09", "name": "FOMC rate decision", "importance": "high" },
+    { "date": "2027-01-27", "name": "FOMC rate decision", "importance": "high" },
+    { "date": "2027-03-17", "name": "FOMC rate decision", "importance": "high" },
+    { "date": "2027-04-28", "name": "FOMC rate decision", "importance": "high" },
+    { "date": "2027-06-16", "name": "FOMC rate decision", "importance": "high" }
+  ],
+  "monthly": [
+    { "name": "Employment Situation (Jobs)", "importance": "high", "nthWeekday": [1, 5] },
+    { "name": "ISM Manufacturing PMI", "importance": "med", "dayOfMonth": 1 },
+    { "name": "Consumer Price Index (CPI)", "importance": "high", "dayOfMonth": 12 },
+    { "name": "Producer Price Index (PPI)", "importance": "med", "dayOfMonth": 13 },
+    { "name": "Advance Retail Sales", "importance": "med", "dayOfMonth": 16 },
+    { "name": "Personal Income & Outlays (PCE)", "importance": "high", "dayOfMonth": 28 }
+  ],
+  "quarterly": [
+    { "name": "Gross Domestic Product (GDP, advance)", "importance": "high", "months": [1, 4, 7, 10], "dayOfMonth": 30 }
+  ]
+}

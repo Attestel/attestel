@@ -1,0 +1,17 @@
+{
+  "barStore": {
+    "backend": "postgresql",
+    "intradayRetentionDays": 90,
+    "rows": 800,
+    "schema": "<SCHEMA>",
+    "target": "<POSTGRES>",
+    "tickers": 1,
+    "timeframes": [
+      "1D",
+      "1H"
+    ],
+    "writable": true
+  },
+  "service": "analysis",
+  "status": "ok"
+}

@@ -1,0 +1,3 @@
+# Database driver is isolated from the shared dependency layer so changing storage does not force
+# the large scientific/LLM dependency set to resolve again in the all-in-one image.
+psycopg[binary]==3.2.9

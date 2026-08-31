@@ -1,0 +1,16 @@
+{
+  "barStore": {
+    "backend": "str",
+    "intradayRetentionDays": "int",
+    "rows": "int",
+    "schema": "str",
+    "target": "str",
+    "tickers": "int",
+    "timeframes": [
+      "str"
+    ],
+    "writable": "bool"
+  },
+  "service": "str",
+  "status": "str"
+}

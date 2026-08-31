@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>NVIDIA Corporation - Events</title>
+    <link>https://investor.nvidia.com/events-and-presentations/events/default.aspx</link>
+    <item>
+      <title>NVIDIA Q3 FY2027 Financial Results Conference Call</title>
+      <link>https://investor.nvidia.com/events-and-presentations/events/event-details/2026/Q3-FY27/</link>
+      <eventDate>November 18, 2026 2:00 PM</eventDate>
+      <pubDate>Mon, 10 Aug 2026 13:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>NVIDIA at the Goldman Sachs Communacopia Conference</title>
+      <link>https://investor.nvidia.com/events-and-presentations/events/event-details/2026/gs/</link>
+      <eventDate>September 09, 2026 9:30 AM</eventDate>
+      <pubDate>Mon, 10 Aug 2026 13:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>NVIDIA Q4 FY2027 Financial Results Conference Call</title>
+      <link>https://investor.nvidia.com/events-and-presentations/events/event-details/2027/Q4-FY27/</link>
+      <eventDate>February 24, 2027</eventDate>
+      <pubDate>Mon, 10 Aug 2026 13:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>NVIDIA Investor Day (date to be announced)</title>
+      <link>https://investor.nvidia.com/events-and-presentations/events/event-details/2027/investor-day/</link>
+      <eventDate>TBD</eventDate>
+      <pubDate>Mon, 10 Aug 2026 13:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

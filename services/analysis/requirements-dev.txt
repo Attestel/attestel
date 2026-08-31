@@ -1,0 +1,31 @@
+# Test-only dependencies for services/analysis. NOT installed into the runtime image — `Dockerfile`
+# installs `requirements.txt` alone, and nothing here may be imported by `app/`.
+#
+# WHY THIS FILE EXISTS. The suite could not run in a clean checkout and nothing said so. The claim
+# every one of these files is really making is "a clean checkout works", and until Wave 4 integration
+# that claim was false in four services at once. `services/llm` was fixed at Wave 4 preflight and its
+# dev file records the same reasoning; this is the same fix applied to the other two suites that have
+# one, plus the interpreter floor that Wave 4 Lane 4B observed for `services/events`.
+#
+# WHAT THE SUITE ACTUALLY IMPORTS, measured rather than guessed
+# (`grep -rhoE '^\s*(import|from) \w+' tests/*.py`):
+#
+#   pytest       the runner itself — nothing declared it
+#   httpx        NOT imported by any test directly. Four test files drive the app through
+#                `fastapi.testclient.TestClient`, which is `starlette.testclient`, which imports
+#                `httpx` and raises RuntimeError without it. This is the exact shape that kept two
+#                `services/llm` tests permanently red in every venv that had not happened to acquire
+#                httpx some other way — a suite with permanently red tests trains its readers to
+#                read red as normal.
+#   numpy,       already in `requirements.txt` (runtime deps of the indicators), so not repeated here
+#   pandas
+#
+# INTERPRETER. `services/analysis` needs its own `.venv` — the machine's `python3` is 3.9.6 and has
+# no pandas at all, measured in Wave 3 after Wave 2 reported it and Wave 2's integrator wrongly
+# denied it. `python -m pytest` from a shell resolves to that interpreter and fails for a reason
+# unrelated to the code. Run `./.venv/bin/python -m pytest -q`.
+#
+# PIN. `pytest==9.1.1` is what produced this suite's green run at Wave 4 integration (168 passed),
+# on the interpreter above. Pin to what has actually run, not to what is newest.
+pytest==9.1.1
+httpx==0.28.1

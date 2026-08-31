@@ -1,0 +1,29 @@
+# Keep the build context small and secret-free.
+.git
+**/.git
+**/.DS_Store
+
+# Secrets — never bake real .env files into the image
+**/.env
+**/.env.*
+
+# Python
+**/.venv
+venv/
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+
+# Node / web
+**/node_modules
+web/dist
+
+# Runtime state (mounted at deploy time, regenerated)
+data/
+**/data/
+
+# Docs / local tooling not needed in the image
+.claude/
+design_examples/

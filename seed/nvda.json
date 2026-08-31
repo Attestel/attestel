@@ -1,0 +1,101 @@
+{
+  "ticker": "NVDA",
+  "company": "NVIDIA Corporation",
+  "asOfNote": "Verified as of 2026-07-07. Hard figures from NVIDIA SEC filings / newsroom; consensus & stock reactions are approximate (financial media). See docs/NVIDIA_RESEARCH.md for sources and caveats.",
+  "fiscalCalendarNote": "NVIDIA fiscal year ends late January; fiscal quarters run ~1 month ahead of calendar. FY2026 mostly covers calendar 2025.",
+  "accountingTraps": [
+    "Non-GAAP EPS INCLUDES stock-based comp starting Q1 FY2027 (previously excluded). Pre/post figures are not comparable unless restated.",
+    "Segment structure changed in Q1 FY2027: standalone 'Gaming' is no longer disclosed (folded into new 'Edge Computing' platform)."
+  ],
+  "fundamentals": {
+    "quarters": [
+      {
+        "label": "Q1 FY2027",
+        "periodEnded": "2026-04-26",
+        "reported": "2026-05-20",
+        "isLatest": true,
+        "revenue":        { "actual": 81.615, "estimate": 78.8, "unit": "B USD", "yoyPct": 85, "qoqPct": 20, "beat": true },
+        "dataCenter":     { "actual": 75.2, "unit": "B USD", "yoyPct": 92, "note": "record; compute 60.4B, networking record 14.8B (+199% YoY)" },
+        "edgeComputing":  { "actual": 6.4, "unit": "B USD", "yoyPct": 29, "note": "includes Gaming; Gaming not broken out separately" },
+        "epsGaap":        { "actual": 2.39, "unit": "USD" },
+        "epsNonGaap":     { "actual": 1.87, "estimate": 1.76, "unit": "USD", "basis": "new (incl. SBC)", "beat": true },
+        "grossMargin":    { "gaap": 74.9, "nonGaap": 75.0, "unit": "%" },
+        "nextGuide":      { "period": "Q2 FY2027", "revenue": 91.0, "band": 2, "unit": "B USD", "note": "above sell-side consensus; some buy-side had whispered ~86B" },
+        "china":          "Q2 outlook assumes zero China DC-compute revenue. No H20 charge this quarter.",
+        "capitalReturns": "New $80B buyback authorization; dividend raised $0.01 -> $0.25.",
+        "stockReaction":  "Fell despite the beat (approx; exact % not primary-sourced)."
+      },
+      {
+        "label": "Q4 FY2026",
+        "periodEnded": "2026-01-25",
+        "reported": "2026-02-25",
+        "isLatest": false,
+        "revenue":        { "actual": 68.127, "estimate": 65.9, "unit": "B USD", "yoyPct": 73, "qoqPct": 20, "beat": true },
+        "dataCenter":     { "actual": 62.3, "unit": "B USD", "yoyPct": 75, "note": "record" },
+        "gaming":         { "actual": 3.7, "unit": "B USD", "yoyPct": 47, "qoqPct": -13, "note": "holiday channel normalization" },
+        "epsNonGaap":     { "actual": 1.62, "actualRestated": 1.59, "estimate": 1.53, "unit": "USD", "basis": "old (excl. SBC); restated 1.59 on new basis", "beat": true },
+        "grossMargin":    { "gaap": 75.0, "nonGaap": 75.2, "unit": "%" },
+        "nextGuide":      { "period": "Q1 FY2027", "revenue": 78.0, "band": 2, "unit": "B USD", "note": "above ~72.6B expected" },
+        "fullYear":       { "period": "FY2026", "revenue": 215.9, "yoyPct": 65, "epsGaap": 4.90, "epsNonGaap": 4.77, "unit": "B USD / USD" },
+        "stockReaction":  "Initial after-hours gain that mostly faded."
+      },
+      {
+        "label": "Q3 FY2026",
+        "periodEnded": "2025-10-26",
+        "reported": "2025-11-19",
+        "isLatest": false,
+        "revenue":        { "actual": 57.006, "estimate": 55.2, "unit": "B USD", "yoyPct": 62, "qoqPct": 22, "beat": true },
+        "dataCenter":     { "actual": 51.2, "unit": "B USD", "yoyPct": 66, "note": "record" },
+        "gaming":         { "actual": 4.3, "unit": "B USD", "yoyPct": 30 },
+        "epsNonGaap":     { "actual": 1.30, "estimate": 1.25, "unit": "USD", "basis": "GAAP == non-GAAP this quarter", "beat": true },
+        "grossMargin":    { "gaap": 73.4, "nonGaap": 73.6, "unit": "%" },
+        "nextGuide":      { "period": "Q4 FY2026", "revenue": 65.0, "unit": "B USD", "note": "midpoint; raised" },
+        "quote":          "Jensen Huang: 'Blackwell sales are off the charts, and cloud GPUs are sold out.'",
+        "stockReaction":  "Rose ~4% after-hours."
+      }
+    ]
+  },
+  "roadmap": [
+    { "gen": "Blackwell",       "products": "B100 / B200 / GB200 NVL72", "year": 2024, "status": "shipping",   "note": "Volume installed base; 'king of inference today' (Jensen)." },
+    { "gen": "Blackwell Ultra", "products": "B300 / GB300",              "year": 2025, "status": "ramping",    "note": "Ramping hard through 2026. Unit figures are press estimates." },
+    { "gen": "Vera Rubin",      "products": "Rubin R100 GPU + Vera CPU (VR200 NVL72)", "year": 2026, "status": "full production, volume shipments 'this fall'", "note": "Announced GTC 2026; NOT yet shipping at scale. Adds Spectrum-X Photonics + BlueField-4. Specs press/secondary." },
+    { "gen": "Rubin Ultra",     "products": "'Kyber' NVL576",            "year": 2027, "status": "announced",  "note": "Press/secondary." },
+    { "gen": "Feynman",         "products": "TBA",                       "year": 2028, "status": "announced",  "note": "Press/secondary." }
+  ],
+  "suppliers": [
+    { "name": "TSMC",       "role": "Foundry + CoWoS packaging", "criticality": "critical", "note": "CoWoS advanced packaging is the binding supply constraint; reported sold out through 2025-2026." },
+    { "name": "SK Hynix",   "role": "HBM memory", "criticality": "high", "note": "Lead HBM4 supplier for Rubin era." },
+    { "name": "Micron",     "role": "HBM memory", "criticality": "high", "note": "Ramping HBM4 to volume in 2026." },
+    { "name": "Samsung",    "role": "HBM memory", "criticality": "medium", "note": "Qualifying / regaining HBM4 share." },
+    { "name": "Foxconn (Hon Hai)", "role": "ODM / rack integration", "criticality": "high", "note": "Central to GB300 ramp/yield (press)." },
+    { "name": "Supermicro", "role": "Server / rack maker", "criticality": "medium", "note": "Confirmed Vera Rubin partner." },
+    { "name": "Dell / HPE / Lenovo / Quanta / Wistron", "role": "ODM / OEM partners", "criticality": "medium", "note": "Confirmed Vera Rubin production partners." }
+  ],
+  "catalysts": [
+    { "date": "2026-05-31", "type": "product",     "title": "Vera Rubin enters full production (GTC Taipei)", "impact": "high", "note": "Volume shipments begin 'this fall' 2026." },
+    { "date": "2026-05-20", "type": "earnings",    "title": "Q1 FY2027 results: $81.6B revenue, $91B Q2 guide", "impact": "high", "note": "Beat but stock fell." },
+    { "date": "2026-06",    "type": "sovereign-ai","title": "Europe unveils 35 new NVIDIA AI supercomputers", "impact": "medium", "note": "Confirmed (NVIDIA newsroom)." },
+    { "date": "2026-03-16", "type": "event",       "title": "GTC 2026 (San Jose) — Vera Rubin announced", "impact": "high", "note": "Jensen keynote." },
+    { "date": "2026-01-15", "type": "regulatory",  "title": "BIS reportedly shifts H200 China review to case-by-case", "impact": "medium", "note": "Verify against Federal Register." }
+  ],
+  "risks": [
+    "China export controls (H20/H200) — China no longer in baseline forecast; was ~1/5 of DC revenue at peak.",
+    "Supply-constrained: CoWoS packaging + HBM4 yields cap output more than demand does.",
+    "Competition: AMD MI400 (MI450 2026, OpenAI ~6GW deal), Google TPU, AWS Trainium, MS Maia — inference cost-sensitivity favors challengers.",
+    "Valuation/expectations risk: beats can still sell off when buy-side whispers exceed the guide (see Q1 FY2027)."
+  ],
+  "monitor": {
+    "note": "No 'Musk' equivalent — Jensen communicates in set-pieces, not constant posts.",
+    "eventCadence": ["CES (Jan)", "GTC San Jose (Mar)", "GTC Taipei / COMPUTEX (May-Jun)", "Earnings (Feb/May/Aug/Nov)"],
+    "channels": [
+      { "name": "NVIDIA Newsroom", "url": "https://nvidianews.nvidia.com", "confidence": "ground-truth" },
+      { "name": "NVIDIA Blog",     "url": "https://blogs.nvidia.com",      "confidence": "ground-truth" },
+      { "name": "Investor Relations", "url": "https://investor.nvidia.com", "confidence": "ground-truth" },
+      { "name": "SEC EDGAR (10-K/10-Q/8-K)", "url": "https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&CIK=0001045810", "confidence": "ground-truth" }
+    ],
+    "keyPeople": [
+      { "name": "Jensen Huang", "role": "Founder / President / CEO", "signal": "Keynotes (GTC/CES) reveal roadmap and move the stock." },
+      { "name": "Colette Kress", "role": "EVP & CFO", "signal": "Earnings-call guidance is the most market-moving recurring event." }
+    ]
+  }
+}

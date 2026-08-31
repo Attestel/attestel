@@ -1,0 +1,40 @@
+{
+  "name": "short-episode",
+  "description": "A short held two bars and closed. A short earns the NEGATIVE of the bar return.",
+  "inputs": {
+    "costBps": 50.0,
+    "timeframe": "1D",
+    "retNext": [
+      -0.1,
+      0.04,
+      -0.02
+    ],
+    "positions": [
+      -1.0,
+      -1.0,
+      0.0
+    ]
+  },
+  "expected": {
+    "net": [
+      0.095,
+      -0.04,
+      -0.005
+    ],
+    "equity": [
+      1.095,
+      1.0512,
+      1.045944
+    ],
+    "totalReturn": 0.045944,
+    "mean": 0.016666666667,
+    "std": 0.057203341006,
+    "numTrades": 1,
+    "turnover": [
+      1.0,
+      0.0,
+      1.0
+    ]
+  },
+  "tolerance": 1e-09
+}

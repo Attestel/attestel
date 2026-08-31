@@ -1,0 +1,40 @@
+# Test-only dependencies for services/events. NOT installed into the runtime image — `Dockerfile`
+# installs `requirements.txt` alone, and nothing here may be imported by `app/`.
+#
+# WHY THIS FILE EXISTS: see the header of `services/analysis/requirements-dev.txt`.
+#
+# ────────────────────────────────────────────────────────────────────────────────────────────────
+# THIS SERVICE HAS A HARD INTERPRETER FLOOR: PYTHON >= 3.10. It is not a preference and it is not
+# satisfiable by installing anything in this file.
+#
+# Observed by Wave 4 Lane 4B, reproduced and CHARACTERISED at Wave 4 integration, because the two
+# descriptions differ and the difference is the whole diagnosis:
+#
+#   $ python3 --version                                    # the machine's default
+#   Python 3.9.6
+#   $ python3 -c "import app.main"
+#   TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'
+#
+# It is NOT a syntax error, and every module in `app/` DOES carry `from __future__ import
+# annotations` — so the PEP 604 unions (`str | None`) are stored as strings and parse fine under
+# 3.9. What fails is later: FastAPI/Pydantic **evaluates** those deferred annotations at import time
+# (`eval(self.__forward_code__, ...)`), and `str | None` cannot be evaluated on 3.9 whatever the
+# future-import did to the parser. So "add the future import" is not the fix and looking for a
+# missing one is a dead end — the floor is real.
+#
+# Run the suite on a 3.10+ interpreter: `./.venv/bin/python -m pytest -q` (create the venv with
+# `python3.13 -m venv .venv` or similar). Under the shell's 3.9.6 the failure you actually see first
+# is `No module named pytest`, which hides the floor behind a second, unrelated problem.
+# ────────────────────────────────────────────────────────────────────────────────────────────────
+#
+# WHAT THE SUITE ACTUALLY IMPORTS, measured (`grep -rhoE '^\s*(import|from) \w+' tests/*.py`):
+#
+#   pytest        the runner itself — nothing declared it
+#   httpx         NOT imported directly. Six test files drive the app through
+#                 `fastapi.testclient.TestClient`, which imports it and raises without it.
+#   requests      imported directly by the provider tests; already a runtime dependency
+#
+# PIN. `pytest==9.1.1` matches the version pinned in every other service's dev file, so one
+# interpreter upgrade does not silently move four suites onto four runners.
+pytest==9.1.1
+httpx==0.28.1

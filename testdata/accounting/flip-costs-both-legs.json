@@ -1,0 +1,45 @@
+{
+  "name": "flip-costs-both-legs",
+  "description": "Zero returns everywhere, so every number in `net` IS a cost. Two flips: each must charge 2x, proving both legs of a flip are billed.",
+  "inputs": {
+    "costBps": 25.0,
+    "timeframe": "1D",
+    "retNext": [
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "positions": [
+      1.0,
+      -1.0,
+      1.0,
+      0.0
+    ]
+  },
+  "expected": {
+    "net": [
+      -0.0025,
+      -0.005,
+      -0.005,
+      -0.0025
+    ],
+    "equity": [
+      0.9975,
+      0.9925125,
+      0.9875499375,
+      0.985081062656
+    ],
+    "totalReturn": -0.014918937344,
+    "mean": -0.00375,
+    "std": 0.00125,
+    "numTrades": 3,
+    "turnover": [
+      1.0,
+      2.0,
+      2.0,
+      1.0
+    ]
+  },
+  "tolerance": 1e-09
+}
