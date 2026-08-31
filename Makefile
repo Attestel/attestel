@@ -1,7 +1,7 @@
 # Convenience targets. The app needs no Makefile to run (see README) — these just wrap the commands
 # people type most. Everything here is research/analysis; nothing places an order or moves money.
 
-.PHONY: help evaluate evaluate-quick evaluate-local evaluate-events evaluate-events-quick evaluate-events-local collect-estimates collect-estimates-local test-prediction ingest ingest-once ablate enrich-once smoke-model automate-once automate-lane production-scheduler automation-status
+.PHONY: help fmt fmt-check evaluate evaluate-quick evaluate-local evaluate-events evaluate-events-quick evaluate-events-local collect-estimates collect-estimates-local test-prediction ingest ingest-once ablate enrich-once smoke-model automate-once automate-lane production-scheduler automation-status
 
 help:
 	@echo "Targets:"
@@ -32,6 +32,8 @@ help:
 	@echo "                              including Scout and the Opportunity Radar."
 	@echo "  make automation-status      Lane health: enabled, last success, last failure,"
 	@echo "                              freshness, queue depth. Reads only; no secret values."
+	@echo "  make fmt                    Rewrite Go sources with gofmt across all six modules."
+	@echo "  make fmt-check              Fail if any Go source is not gofmt-clean (what CI enforces)."
 
 # The Stage-1 go/no-go: does the model have a REAL edge? Long-running (universe x horizons x
 # walk-forward folds x permutations); expect minutes, not seconds. Writes data/eval/report-*.{md,json}.
@@ -192,6 +194,27 @@ health: ## verify every service is running, then curl its /health
 		printf "  %-6s %-11s %s\n" "$$p" "$$s" "$$code"; \
 		[ "$$code" = "200" ] || rc=1; \
 	done; exit $$rc
+
+# ---- formatting ----------------------------------------------------------------------------------
+#
+# CI's `syntax` job runs `gofmt -l` over these six modules and fails the aggregate `ci` check on any
+# drift. Keeping the list in one variable means a seventh module gets added here, not in two places.
+GO_MODULES := alerts auth feedback gateway journal paper
+
+fmt: ## rewrite Go sources with gofmt across all six modules
+	gofmt -w $(GO_MODULES)
+
+# `gofmt -l` exits 0 whether or not it printed anything, so the non-empty output IS the failure
+# signal -- hence the explicit test rather than relying on the exit code. The body mirrors the CI
+# step, including the diff, so a local failure reads the same as the one CI would have shown.
+fmt-check: ## fail if any Go source is not gofmt-clean (what CI enforces)
+	@unformatted="$$(gofmt -l $(GO_MODULES))"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt would rewrite these files:"; \
+		printf '%s\n' "$$unformatted"; \
+		gofmt -d $$unformatted; \
+		exit 1; \
+	fi
 
 # ---- automation (Phase 1) ------------------------------------------------------------------------
 #
