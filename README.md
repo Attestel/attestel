@@ -1,6 +1,6 @@
 # Attestel
 
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat)](LICENSE) [![Status: beta](https://img.shields.io/badge/status-beta-orange?style=flat)](#status-and-honest-limits) [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat)](CONTRIBUTING.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat)](LICENSE) [![Status: beta](https://img.shields.io/badge/status-beta-orange?style=flat)](#status-and-honest-limits) [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat)](CONTRIBUTING.md)
 
 **An investment research OS you run yourself.** Your data, your machine, your model.
 
@@ -292,10 +292,7 @@ Security issues: please read **[SECURITY.md](SECURITY.md)** and report privately
 
 ## License
 
-[GNU AGPL-3.0](LICENSE). Copyright © 2026 Attestel contributors.
-
-If you run a modified version of Attestel as a network service, the AGPL requires you to offer its
-users the corresponding source.
+[MIT](LICENSE). Copyright © 2026 Attestel contributors.
 
 ---
 

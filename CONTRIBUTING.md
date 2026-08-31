@@ -136,4 +136,4 @@ security-related, use [SECURITY.md](SECURITY.md) instead of a public issue.
 ## License
 
 By contributing you agree that your contributions are licensed under the
-[GNU AGPL-3.0](LICENSE).
+[MIT License](LICENSE).
