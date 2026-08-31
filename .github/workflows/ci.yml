@@ -7,7 +7,7 @@
 #   syntax   → the cheap parse-everything gate (YAML/JSON/shell/Python/Go formatting)
 #   guards   → the CONTRIBUTING.md discipline rules that a grep can actually enforce
 #   go/python/web → the real suites, fanned out per module, against a real PostgreSQL
-#   docker   → every image builds; on main they are published to GHCR
+#   docker   → every image builds; on master they are published to GHCR
 #   ci       → the one aggregate status to mark "required" in branch protection
 #
 # WHY A REAL POSTGRES SERVICE. Every DB-backed suite here skips itself when its own
@@ -20,7 +20,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
   workflow_dispatch:
   schedule:
@@ -28,7 +28,7 @@ on:
     # which is exactly why they cannot live on the PR path (see the `advisories` job).
     - cron: '17 4 * * *'
 
-# A new push to a PR makes the previous run's answer worthless; on main every commit's answer is
+# A new push to a PR makes the previous run's answer worthless; on master every commit's answer is
 # kept, because that is the history someone will bisect.
 concurrency:
   group: ci-${{ github.ref }}
@@ -493,7 +493,7 @@ jobs:
           retention-days: 7
 
   # ───────────────────────────────────────────────────────────────────────────────────────────────
-  # Images. Every Dockerfile must build; on main the result is published to GHCR, which is the whole
+  # Images. Every Dockerfile must build; on master the result is published to GHCR, which is the whole
   # of the CD here — this repo is deployed by pulling an image, and no deploy target is configured
   # in it, so nothing further is invented.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -505,7 +505,7 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      packages: write   # only exercised by the publish step, which is main-only
+      packages: write   # only exercised by the publish step, which is master-only
     strategy:
       fail-fast: false
       matrix:
@@ -521,7 +521,7 @@ jobs:
         run: echo "repo=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - uses: docker/login-action@v3
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -540,14 +540,14 @@ jobs:
         with:
           context: ${{ matrix.image.context }}
           file: ${{ matrix.image.file }}
-          # A PR proves the image builds; only main publishes one.
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          # A PR proves the image builds; only master publishes one.
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Attestations are only exportable by the registry push, so they are requested on
           # exactly the runs that publish.
-          provenance: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          sbom: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          provenance: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+          sbom: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
           cache-from: type=gha,scope=${{ matrix.image.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
 
@@ -585,12 +585,12 @@ jobs:
   #
   # These jobs change their answer when a feed changes, without a line of this repo changing. Wired
   # into the PR path they would eventually turn a red build into background noise, which is how a
-  # real finding gets waved through. They run nightly and on main, where a new finding is news
+  # real finding gets waved through. They run nightly and on master, where a new finding is news
   # rather than an obstacle between a contributor and their merge.
   # ───────────────────────────────────────────────────────────────────────────────────────────────
   advisories:
     name: advisories
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -645,7 +645,7 @@ jobs:
   # languages of it on every push would dominate the queue.
   codeql:
     name: codeql / ${{ matrix.language }}
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
