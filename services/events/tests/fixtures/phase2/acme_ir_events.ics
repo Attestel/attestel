@@ -1,0 +1,21 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Acme Industries//Investor Relations//EN
+BEGIN:VEVENT
+UID:acme-q3-2026@example.com
+SUMMARY:Acme Industries Third Quarter 2026 Earnings Conference Call
+DTSTART:20261027T203000Z
+URL:https://investors.example.com/events/q3-2026
+END:VEVENT
+BEGIN:VEVENT
+UID:acme-agm-2027@example.com
+SUMMARY:Acme Industries Annual Meeting of Shareholders
+DTSTART;VALUE=DATE:20270512
+URL:https://investors.example.com/events/agm-2027
+END:VEVENT
+BEGIN:VEVENT
+UID:acme-broken@example.com
+SUMMARY:Acme Industries Fourth Quarter 2026 Earnings Conference Call
+DTSTART:not-a-timestamp
+END:VEVENT
+END:VCALENDAR

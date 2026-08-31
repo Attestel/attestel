@@ -1,0 +1,80 @@
+# Single public entrypoint. nginx always owns 8080 (point your platform's service targetPort here).
+# If the platform injects a different $PORT, the entrypoint adds it as a second listener too.
+# Serves the public entry page at "/", the built React product under "/app/", and reverse-proxies
+# every backend service on localhost, so the whole app is same-origin (no CORS) behind one port.
+worker_processes auto;
+events { worker_connections 1024; }
+
+http {
+  include       /etc/nginx/mime.types;
+  default_type  application/octet-stream;
+  sendfile      on;
+  keepalive_timeout 65;
+  gzip on;
+  gzip_types text/plain text/css application/json application/javascript text/xml application/xml image/svg+xml;
+
+  # Buffer/timeout headroom for the LLM read + backtest endpoints (they can be slow).
+  proxy_read_timeout 120s;
+  proxy_connect_timeout 10s;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto $scheme;
+
+  server {
+    listen      8080 default_server;
+__EXTRA_LISTEN__
+    server_name _;
+    root        /var/www/html;
+    index       index.html;
+
+    # Emit RELATIVE Location headers. nginx listens on 8080 behind a TLS-terminating platform proxy,
+    # so an absolute redirect would leak the internal scheme+port (http://host:8080/app/#signin)
+    # instead of staying on the public origin.
+    absolute_redirect off;
+
+    # Gateway: composite API + its probes.
+    #
+    # /health is LIVENESS — 200 whenever the gateway process can serve, with per-dependency detail
+    # in the body (see gateway/health.go). This is what the frontend HealthDot polls, and it is what
+    # the platform's LIVENESS probe should point at.
+    #
+    # /ready is READINESS — 503 when a required upstream (analysis/events, i.e. PostgreSQL) is down.
+    # Point the platform's READINESS probe here so traffic stops being routed to an instance that
+    # cannot answer. Do NOT point liveness at it: during a database outage that would restart-loop a
+    # gateway that is working perfectly well.
+    location /api/     { proxy_pass http://127.0.0.1:8181; }
+    location = /health { proxy_pass http://127.0.0.1:8181; }
+    location = /ready  { proxy_pass http://127.0.0.1:8181; }
+
+    # Aux services — trailing slash on proxy_pass strips the /svc/<name> prefix,
+    # so /svc/alerts/rules -> 127.0.0.1:8095/rules, etc.
+    location /svc/alerts/  { proxy_pass http://127.0.0.1:8095/; }
+    location /svc/journal/ { proxy_pass http://127.0.0.1:8096/; }
+    location /svc/paper/   { proxy_pass http://127.0.0.1:8097/; }
+    location /svc/feedback/ { proxy_pass http://127.0.0.1:8098/; }
+    location /svc/auth/    { proxy_pass http://127.0.0.1:8099/; }
+
+    # ── Public site ────────────────────────────────────────────────────────
+    # "/" is the public entry page — a single self-contained HTML document (deploy/webroot/).
+    # Exact-match only, so it can never swallow a product route.
+    location = / { try_files /index.html =404; }
+
+    # ── React product ──────────────────────────────────────────────────────
+    # Everything under /app/ is the SPA: real files (Vite chunks at /app/assets/...) win,
+    # anything else falls back to /app/index.html so a hard refresh on a product route works.
+    # Sign-in/sign-up are client-side fragments (/app/#signin), which never reach nginx.
+    location /app/ { try_files $uri $uri/ /app/index.html; }
+    location = /app { return 301 /app/; }
+
+    # Compatibility redirects. A fragment is browser-side, so it must travel in the Location
+    # header of a redirect — it can't be proxied. `return` emits the string verbatim (unlike
+    # `rewrite ... redirect`, which would escape the "#").
+    location = /signin { return 301 /app/#signin; }
+    location = /signup { return 301 /app/#signup; }
+
+    # Anything else: static files only. Deliberately NOT a catch-all fallback to either
+    # index.html — an unknown path is a 404, not the entry page and not the SPA.
+    location / { try_files $uri $uri/ =404; }
+  }
+}

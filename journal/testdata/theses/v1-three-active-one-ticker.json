@@ -1,0 +1,34 @@
+[
+  {
+    "id": "1111111111111111",
+    "ticker": "NVDA",
+    "text": "Long thesis: multi-year datacenter compounding.",
+    "status": "active",
+    "createdAt": 1745000000,
+    "updatedAt": 1745000000
+  },
+  {
+    "id": "2222222222222222",
+    "ticker": "NVDA",
+    "text": "Catalyst thesis: the next earnings print beats on datacenter revenue.",
+    "status": "active",
+    "createdAt": 1746000000,
+    "updatedAt": 1746000000
+  },
+  {
+    "id": "3333333333333333",
+    "ticker": "NVDA",
+    "text": "Supply thesis: packaging capacity stops being the binding constraint this year.",
+    "status": "active",
+    "createdAt": 1747000000,
+    "updatedAt": 1747000000
+  },
+  {
+    "id": "4444444444444444",
+    "ticker": "NVDA",
+    "text": "Retired: the crypto-demand thesis, kept for the record.",
+    "status": "archived",
+    "createdAt": 1720000000,
+    "updatedAt": 1730000000
+  }
+]

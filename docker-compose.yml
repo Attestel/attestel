@@ -1,0 +1,638 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=attestel_events
+      - POSTGRES_USER=attestel
+      - POSTGRES_PASSWORD=attestel
+    ports: [ "${POSTGRES_PORT:-55432}:5432" ]
+    volumes:
+      - postgres-events:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U attestel -d attestel_events" ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  analysis:
+    build: ./services/analysis
+    ports: [ "8001:8001" ]
+    environment:
+      # Price sources — ALL optional. With none set, yfinance (Yahoo, no key) serves REAL prices;
+      # synthetic seed is only used offline. Order: Alpaca → Twelve Data → yfinance → Tiingo → synthetic.
+      # Alpaca (free IEX) — intraday + daily bars + quote. Requires broker KYC; optional.
+      - APCA_API_KEY_ID=${APCA_API_KEY_ID:-}
+      - APCA_API_SECRET_KEY=${APCA_API_SECRET_KEY:-}
+      # Twelve Data — official, email-only signup (no KYC), free 800 req/day. Used only if set.
+      - TWELVEDATA_API_KEY=${TWELVEDATA_API_KEY:-}
+      # optional daily-EOD fallback (1D only)
+      - TIINGO_API_KEY=${TIINGO_API_KEY:-}
+      # PostgreSQL-only point-in-time bar store. Events use public; analysis owns this schema.
+      - BARS_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - BARS_DATABASE_SCHEMA=analysis
+      - BARS_DB_CONNECT_TIMEOUT=${BARS_DB_CONNECT_TIMEOUT:-10}
+      - BARS_DB_STATEMENT_TIMEOUT_MS=${BARS_DB_STATEMENT_TIMEOUT_MS:-15000}
+      # Daily bars persist permanently; intraday bars are swept after this many days.
+      - INTRADAY_RETENTION_DAYS=${INTRADAY_RETENTION_DAYS:-90}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  llm:
+    build: ./services/llm
+    ports: [ "8002:8002" ]
+    environment:
+      # PRIMARY: a managed OpenAI-compatible endpoint (free Qwen). On such a platform these are injected
+      # into the pod automatically; locally, set them in the root .env to use the same model.
+      # Wave 5C: the self-hosted, KEYLESS model runtime, tried first. NO DEFAULT on any of these —
+      # unset ⇒ the llm service serves `stub:offline` explicitly and says why on /health. A `:-`
+      # default here would reintroduce at the compose layer exactly the silent localhost attempt
+      # the code-side change removed. There is no MODEL_RUNTIME_API_KEY line, deliberately.
+      - MODEL_RUNTIME_URL=${MODEL_RUNTIME_URL:-}
+      - MODEL_RUNTIME_MODEL=${MODEL_RUNTIME_MODEL:-}
+      - MODEL_RUNTIME_KIND=${MODEL_RUNTIME_KIND:-}
+      - MODEL_RUNTIME_NAME=${MODEL_RUNTIME_NAME:-}
+      - AI_QUANTIZATION=${AI_QUANTIZATION:-}
+      - AI_BASE_URL=${AI_BASE_URL:-}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_MODEL=${AI_MODEL:-qwen3-14b}
+      # FALLBACK backend, tried only if the managed endpoint above is unset/unreachable.
+      # "ollama" (daemon) or "openai" (a managed Qwen endpoint / LM Studio / any OpenAI-compatible server).
+      # Falls back to a deterministic stub if no provider is reachable.
+      - LLM_BACKEND=${LLM_BACKEND:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-qwen3-14b}
+      # For the openai backend, LLM_BASE_URL/LLM_API_KEY default to the managed AI_* endpoint above;
+      # for LM Studio set LLM_BACKEND=openai and LLM_BASE_URL=http://host.docker.internal:1234/v1
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      # NEVER a default here — the key lives in the root .env only (check /health -> llm.apiKeySet)
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      # legacy (still honored by the ollama backend). NO `:-` DEFAULT: it used to read
+      # `${OLLAMA_URL:-http://host.docker.internal:11434}`, which meant an empty `.env` still
+      # dialled a host address. Unset ⇒ the ollama provider is absent from the chain entirely.
+      - OLLAMA_URL=${OLLAMA_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      - READS_DIR=/data/reads
+      # Durable daily reads, committee/transcript snapshots and per-user personas. READS_DIR is now
+      # only the model-lease location, explicit no-DB fallback, and one-time legacy import source.
+      - LLM_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - LLM_DATABASE_SCHEMA=llm
+      # The served ablation verdict is read from prediction's service-owned schema.
+      - PREDICTION_DATABASE_SCHEMA=prediction
+      # Accounts: the gateway forwards a VERIFIED X-User-Id here (this path isn't browser-exposed, so
+      # the llm trusts it — no crypto llm-side). AUTH_SECRET lines up with the other services.
+      - AUTH_SECRET=${AUTH_SECRET:-dev-insecure-change-me}
+      # read by Wave 3B's tools.py; unread today. tools.py runs HERE, not in the gateway (§9.31).
+      - ANALYSIS_URL=http://analysis:8001
+      - EVENTS_URL=http://events:8004
+      # Wave 2B enrichment worker (`make enrich-once` -> `docker compose run --rm llm`). The worker
+      # runs in THIS container, so the gate variable has to be here: it was on `events` only, which
+      # made the shipped operator command silently inert — the worker exited `enabled: false` and
+      # reported success. Invariant #4 / §9.22: OFF by default and one bounded explicit pass; it is
+      # never driven by the production scheduler.
+      - EVENT_ENRICH_ENABLED=${EVENT_ENRICH_ENABLED:-false}
+      - ENRICH_BATCH_SIZE=${ENRICH_BATCH_SIZE:-5}
+      # §9.12: an event is enriched at publishedAt + this lag, never "now minus this lag".
+      - ENRICH_LAG_HOURS=${ENRICH_LAG_HOURS:-24}
+      - ENRICH_MAX_PER_RUN=${ENRICH_MAX_PER_RUN:-25}
+      - ENRICH_IDLE_SECONDS=${ENRICH_IDLE_SECONDS:-30}
+      # Stale-thesis re-synthesis is the same operational shape: one bounded, explicitly invoked
+      # worker pass, off by default, with generation protected by the shared model lease.
+      - THESIS_RESYNTH_ENABLED=${THESIS_RESYNTH_ENABLED:-false}
+      - THESIS_RESYNTH_BATCH_SIZE=${THESIS_RESYNTH_BATCH_SIZE:-5}
+      - ALERTS_URL=http://alerts:8095
+      - JOURNAL_URL=http://journal:8096
+      # Phase 1 automation. The WORKER half of `make automate-once` runs in this container and
+      # drives three lanes: enrich and resynth (both under the cross-process model lease) and the
+      # model-free thesis-monitor sweep in `alerts`. It takes its lane lease from the events
+      # service over HTTP, so two dispatchers cannot enter the same lane.
+      #
+      # OFF by default, and the master flag is not enough on its own — the lane's own flag above
+      # must also be true. `make automate-once` is a single bounded explicit pass; production's
+      # repeating process exists only in services/events and cannot reach these worker lanes.
+      - AUTOMATION_ENABLED=${AUTOMATION_ENABLED:-false}
+      - AUTOMATION_LANES=${AUTOMATION_LANES:-}
+      - AUTOMATION_INTERVAL_ENRICH=${AUTOMATION_INTERVAL_ENRICH:-1800}
+      - AUTOMATION_INTERVAL_RESYNTH=${AUTOMATION_INTERVAL_RESYNTH:-3600}
+      - AUTOMATION_INTERVAL_THESIS_MONITOR=${AUTOMATION_INTERVAL_THESIS_MONITOR:-900}
+      - THESIS_MONITOR_ENABLED=${THESIS_MONITOR_ENABLED:-false}
+      # File fallback only. With LLM_DATABASE_URL configured, the verdict is read from PostgreSQL.
+      - ABLATION_VERDICT_PATH=/data/eval/ablation/verdict.json
+      # Which rung this deployment's analyst pipeline corresponds to. NO DEFAULT, deliberately: a
+      # defaulted rung would match a verdict earned by a different input bundle, which is §9.61
+      # binding 3's coincidence with extra steps. Unset ⇒ no verdict is served and the gate stays
+      # closed, which is the ordinary state until the ladder has run on a prod box.
+      - ABLATION_RUNG=${ABLATION_RUNG:-}
+    volumes:
+      - reads:/data/reads # model lease + one-time import of pre-PostgreSQL snapshots/personas
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Prediction: LightGBM directional signal, VALIDATED by a walk-forward backtest. A Buy/Hold/Sell
+  # bias is only ever exposed WITH its backtest track record + confidence (else signal=null). It
+  # executes NOTHING — the app suggests, the user acts. A model trained on synthetic data is tagged
+  # trainedOnSynthetic=true so the UI shows a loud "SYNTHETIC — not a real backtest" banner.
+  prediction:
+    build: ./services/prediction
+    ports: [ "8003:8003" ]
+    environment:
+      - PORT=8003
+      - ANALYSIS_URL=http://analysis:8001
+      # Wave 3 Lane 3C: the ablation ladder driver reads prediction records from the events
+      # service. ablation.py defaults to this same value; named here for the same reason as above.
+      - EVENTS_URL=http://events:8004
+      # Durable trained artifacts, evaluator verdicts and reports. Prediction owns this schema.
+      - PREDICTION_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - PREDICTION_DATABASE_SCHEMA=prediction
+      # Read-only committee-feature history from the llm-owned schema in the same database.
+      - LLM_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - LLM_DATABASE_SCHEMA=llm
+      - MODELS_DIR=/data/models
+      - ENABLE_CHRONOS=${ENABLE_CHRONOS:-false} # optional expected-path overlay; off by default
+      # Offline edge-evaluation harness (Stage-1 go/no-go). Only read by `python -m app.evaluate`;
+      # the live /predict path ignores them. All optional — sensible defaults live in evaluate.py.
+      - EVAL_UNIVERSE=${EVAL_UNIVERSE:-NVDA,GOOGL,TSLA,AAPL,MSFT,AMZN,META,AMD,AVGO,NFLX,JPM,V,MA,COST,PEP,KO,XOM,CVX,UNH,JNJ,WMT,HD,PG,DIS,BA,CAT,CRM,ORCL,ADBE,QCOM}
+      - EVAL_TIMEFRAME=${EVAL_TIMEFRAME:-1D}
+      - EVAL_HORIZONS=${EVAL_HORIZONS:-5,10}
+      - EVAL_HISTORY_DAYS=${EVAL_HISTORY_DAYS:-3650}
+      - EVAL_HOLDOUT_FRAC=${EVAL_HOLDOUT_FRAC:-0.2}
+      - EVAL_COST_BPS=${EVAL_COST_BPS:-6}
+      - EVAL_PERMUTATIONS=${EVAL_PERMUTATIONS:-300}
+      - EVAL_MIN_TRADES=${EVAL_MIN_TRADES:-100}
+      # Sample-sufficiency floors (portfolio-v3). They can only ever produce INCONCLUSIVE and are
+      # deliberately NOT part of strategy_version(): they judge the SAMPLE, not the strategy.
+      - EVAL_MIN_DATES=${EVAL_MIN_DATES:-252}
+      - EVAL_MIN_HOLDOUT_DATES=${EVAL_MIN_HOLDOUT_DATES:-60}
+      - EVAL_MIN_TICKERS=${EVAL_MIN_TICKERS:-10}
+      - EVAL_MIN_COVERAGE=${EVAL_MIN_COVERAGE:-0.7}
+      - EVAL_SEED=${EVAL_SEED:-42}
+      - EVAL_OUT_DIR=/data/eval
+      # The A–F ablation ladder (`make ablate`, Wave 5A). ABLATE_CUTOFFS has NO DEFAULT: a default
+      # cutoff set would silently differ between two runs, and every rung must run against the
+      # IDENTICAL set (§5.1). The ladder refuses to produce a verdict against `stub:offline`;
+      # ABLATE_REQUIRE_REAL_RUNTIME=false runs the plumbing only and can never produce a verdict a
+      # `direction` word may be gated on.
+      - ABLATE_CUTOFFS=${ABLATE_CUTOFFS:-}
+      - ABLATE_UNIVERSE=${ABLATE_UNIVERSE:-NVDA}
+      - ABLATE_RUNGS=${ABLATE_RUNGS:-B,C,D,E}
+      - ABLATE_SPLIT=${ABLATE_SPLIT:-dev}
+      - ABLATE_CALIBRATION_SPLIT=${ABLATE_CALIBRATION_SPLIT:-dev}
+      - ABLATE_MIN_SAMPLES=${ABLATE_MIN_SAMPLES:-30}
+      - ABLATE_COST_BPS=${ABLATE_COST_BPS:-6}
+      - ABLATE_REQUIRE_REAL_RUNTIME=${ABLATE_REQUIRE_REAL_RUNTIME:-true}
+      - ABLATE_ANALYST_TIMEOUT=${ABLATE_ANALYST_TIMEOUT:-600}
+      # The ladder asks the llm service whether a runtime is configured BEFORE it measures anything.
+      - LLM_URL=http://llm:8002
+      # Offline EVENT-STUDY harness (`python -m app.evaluate_events`). Raw earnings payloads and
+      # event-time text are durable PostgreSQL evidence; /data is a no-DB import/fallback only.
+      - ALPHAVANTAGE_API_KEY=${ALPHAVANTAGE_API_KEY:-}
+      - LLM_URL=http://llm:8002
+      - EVENT_UNIVERSE=${EVENT_UNIVERSE:-NVDA,GOOGL,TSLA,AAPL,MSFT,AMZN,META,AMD,AVGO,NFLX,JPM,V,MA,COST,PEP,KO,XOM,CVX,UNH,JNJ,WMT,HD,PG,DIS,BA,CAT,CRM,ORCL,ADBE,QCOM}
+      - EVENT_TIMEFRAME=${EVENT_TIMEFRAME:-1D}
+      - EVENT_HISTORY_DAYS=${EVENT_HISTORY_DAYS:-3650}
+      - EVENT_HORIZONS=${EVENT_HORIZONS:-10,20}
+      - EVENT_SUE_QUANTILE=${EVENT_SUE_QUANTILE:-0.33}
+      - EVENT_MIN=${EVENT_MIN:-100}
+      - EVENT_COST_BPS=${EVENT_COST_BPS:-6}
+      - EVENT_PERMUTATIONS=${EVENT_PERMUTATIONS:-300}
+      - EVENT_HOLDOUT_FRAC=${EVENT_HOLDOUT_FRAC:-0.2}
+      - EVENT_SEED=${EVENT_SEED:-42}
+      - EVENT_BENCHMARK=${EVENT_BENCHMARK:-SPY}
+      - EVENT_MIN_DATES=${EVENT_MIN_DATES:-252}
+      - EVENT_MIN_HOLDOUT_DATES=${EVENT_MIN_HOLDOUT_DATES:-60}
+      - EVENT_MIN_TICKERS=${EVENT_MIN_TICKERS:-10}
+      - EVENT_MIN_COVERAGE=${EVENT_MIN_COVERAGE:-0.7}
+      - ESTIMATE_SNAPSHOT_MAX_CALLS=${ESTIMATE_SNAPSHOT_MAX_CALLS:-20}
+      - ESTIMATE_ACTUAL_LOOKBACK_DAYS=${ESTIMATE_ACTUAL_LOOKBACK_DAYS:-7}
+      - EVENT_ENABLE_AI=${EVENT_ENABLE_AI:-false}
+      # Analyst-committee features stay neutral until enough real snapshot days exist.
+      - MIN_COMMITTEE_SNAPSHOTS=${MIN_COMMITTEE_SNAPSHOTS:-60}
+      # Immutable challenger automation. The API process only exposes read-only status and the
+      # existing train/evaluate endpoints; the separate controller below owns the clock.
+      - PREDICTION_AUTOMATION_ENABLED=${PREDICTION_AUTOMATION_ENABLED:-false}
+      - PREDICTION_AUTOMATION_CONFIGS=${PREDICTION_AUTOMATION_CONFIGS:-}
+      - PAPER_CONFIGS=${PAPER_CONFIGS:-NVDA:1D:5,GOOGL:1D:5}
+      - PREDICTION_AUTOMATION_POLL_SECONDS=${PREDICTION_AUTOMATION_POLL_SECONDS:-300}
+      - PREDICTION_AUTOMATION_MIN_NEW_BARS=${PREDICTION_AUTOMATION_MIN_NEW_BARS:-5}
+      - PREDICTION_AUTOMATION_MAX_TRIALS=${PREDICTION_AUTOMATION_MAX_TRIALS:-3}
+      - PREDICTION_AUTOMATION_LOOKBACK_DAYS=${PREDICTION_AUTOMATION_LOOKBACK_DAYS:-1500}
+      - PREDICTION_SHADOW_MIN_PAIRED_BARS=${PREDICTION_SHADOW_MIN_PAIRED_BARS:-20}
+    volumes:
+      - models:/data/models # one-time import + explicit no-DB fallback
+      - eval:/data/eval # transient logs + one-time legacy import; durable evidence lives in PostgreSQL
+    depends_on:
+      analysis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  # Separate prediction clock: completed real bars may create an immutable challenger and start the
+  # fixed evaluator. It cannot promote a model or touch the official paper generation.
+  prediction-automation:
+    build: ./services/prediction
+    command: python -m app.autonomy
+    environment:
+      - ANALYSIS_URL=http://analysis:8001
+      - PREDICTION_AUTOMATION_BASE_URL=http://prediction:8003
+      - PREDICTION_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - PREDICTION_DATABASE_SCHEMA=prediction
+      - PREDICTION_AUTOMATION_ENABLED=${PREDICTION_AUTOMATION_ENABLED:-false}
+      - PREDICTION_AUTOMATION_CONFIGS=${PREDICTION_AUTOMATION_CONFIGS:-}
+      - PAPER_CONFIGS=${PAPER_CONFIGS:-NVDA:1D:5,GOOGL:1D:5}
+      - PREDICTION_AUTOMATION_POLL_SECONDS=${PREDICTION_AUTOMATION_POLL_SECONDS:-300}
+      - PREDICTION_AUTOMATION_LEASE_SECONDS=${PREDICTION_AUTOMATION_LEASE_SECONDS:-600}
+      - PREDICTION_AUTOMATION_MIN_NEW_BARS=${PREDICTION_AUTOMATION_MIN_NEW_BARS:-5}
+      - PREDICTION_AUTOMATION_MAX_TRIALS=${PREDICTION_AUTOMATION_MAX_TRIALS:-3}
+      - PREDICTION_AUTOMATION_LOOKBACK_DAYS=${PREDICTION_AUTOMATION_LOOKBACK_DAYS:-1500}
+      - PREDICTION_SHADOW_MIN_PAIRED_BARS=${PREDICTION_SHADOW_MIN_PAIRED_BARS:-20}
+    depends_on:
+      prediction:
+        condition: service_started
+      analysis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  # Global event corpus (amended D-26): FastAPI + PostgreSQL + requests. PostgreSQL is the only
+  # storage engine; provider keys remain optional and reads never trigger ingestion.
+  # Provider ingestion is a separate, bounded job; browser reads use this service's persisted
+  # documents, events, macro releases and Catalyst Calendar without triggering a fetch.
+  events:
+    build: ./services/events
+    ports: [ "8004:8004" ]
+    environment:
+      - PORT=8004
+      - EVENTS_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - EVENTS_DATABASE_SCHEMA=public
+      - EVENTS_DB_CONNECT_TIMEOUT=${EVENTS_DB_CONNECT_TIMEOUT:-10}
+      - EVENTS_DB_STATEMENT_TIMEOUT_MS=${EVENTS_DB_STATEMENT_TIMEOUT_MS:-15000}
+      # §9.25 (Wave 3 Lane 3C): outcomes resolve over HTTP to {ANALYSIS_URL}/candles and NOWHERE
+      # else. predictions.py defaults to this same value, so the service works without the var —
+      # it is named here so the dependency is visible in compose rather than only in code.
+      - ANALYSIS_URL=http://analysis:8001
+      # Default ingestion merges the configured baseline with the privacy-safe aggregate follow set.
+      # Journal failure is non-fatal: the pass records subscriptions:unreachable and keeps baseline.
+      - JOURNAL_URL=http://journal:8096
+      # D-29 per-tier retention. Named here so a counsel-driven narrowing is a one-line change.
+      - RETENTION_PROFESSIONAL_DAYS=${RETENTION_PROFESSIONAL_DAYS:-400}
+      - RETENTION_DISCUSSION_DAYS=${RETENTION_DISCUSSION_DAYS:-90}
+      # D-25: the enrichment worker is OFF by default and is never triggered by a UI event.
+      - EVENT_ENRICH_ENABLED=${EVENT_ENRICH_ENABLED:-false}
+      # Ingestion is a batch job, not a page load (§9.31). OFF by default alongside enrichment.
+      - INGEST_ENABLED=${INGEST_ENABLED:-false}
+      # Phase 1 automation. This container dispatches the lanes it can run against its OWN
+      # database (ingest, reactions, scout-intake, scout, opportunity-radar) and owns the durable lane lease + run
+      # ledger that the `services/llm` half leases over HTTP. AUTH_SECRET protects those two
+      # internal routes; `/automation/status` carries no secret and no flag VALUE, only flag names.
+      #
+      # The remaining flags are named here so `/automation/status` can report every lane's enable
+      # state honestly rather than reporting "false" for a lane whose flag this process cannot see.
+      - AUTOMATION_ENABLED=${AUTOMATION_ENABLED:-false}
+      - AUTOMATION_LANES=${AUTOMATION_LANES:-}
+      - PRODUCTION_SCHEDULER_ENABLED=${PRODUCTION_SCHEDULER_ENABLED:-false}
+      - PRODUCTION_SCHEDULER_POLL_SECONDS=${PRODUCTION_SCHEDULER_POLL_SECONDS:-60}
+      - AUTOMATION_INTERVAL_INGEST=${AUTOMATION_INTERVAL_INGEST:-3600}
+      - AUTOMATION_INTERVAL_ENRICH=${AUTOMATION_INTERVAL_ENRICH:-1800}
+      - AUTOMATION_INTERVAL_RESYNTH=${AUTOMATION_INTERVAL_RESYNTH:-3600}
+      - AUTOMATION_INTERVAL_THESIS_MONITOR=${AUTOMATION_INTERVAL_THESIS_MONITOR:-900}
+      - AUTOMATION_INTERVAL_REACTIONS=${AUTOMATION_INTERVAL_REACTIONS:-21600}
+      - AUTOMATION_INTERVAL_SCOUT_INTAKE=${AUTOMATION_INTERVAL_SCOUT_INTAKE:-14400}
+      - AUTOMATION_INTERVAL_SCOUT=${AUTOMATION_INTERVAL_SCOUT:-14400}
+      - AUTOMATION_INTERVAL_OPPORTUNITY_RADAR=${AUTOMATION_INTERVAL_OPPORTUNITY_RADAR:-14400}
+      - AUTOMATION_LEASE_SECONDS=${AUTOMATION_LEASE_SECONDS:-900}
+      - AUTH_SECRET=${AUTH_SECRET:-dev-insecure-change-me}
+      - THESIS_RESYNTH_ENABLED=${THESIS_RESYNTH_ENABLED:-false}
+      - THESIS_MONITOR_ENABLED=${THESIS_MONITOR_ENABLED:-false}
+      - REACTION_CAPTURE_ENABLED=${REACTION_CAPTURE_ENABLED:-false}
+      - SCOUT_INGEST_ENABLED=${SCOUT_INGEST_ENABLED:-false}
+      - SCOUT_ENABLED=${SCOUT_ENABLED:-false}
+      - OPPORTUNITY_RADAR_ENABLED=${OPPORTUNITY_RADAR_ENABLED:-false}
+      - OPPORTUNITY_BENCHMARK=${OPPORTUNITY_BENCHMARK:-SPY}
+      - OPPORTUNITY_MAX_BAR_AGE_DAYS=${OPPORTUNITY_MAX_BAR_AGE_DAYS:-7}
+      - OPPORTUNITY_MAX_RUN_AGE_SECONDS=${OPPORTUNITY_MAX_RUN_AGE_SECONDS:-604800}
+      - SCOUT_UNIVERSE=${SCOUT_UNIVERSE:-NVDA,GOOGL,TSLA,AAPL,MSFT,AMZN,META,AMD,AVGO,NFLX,JPM,V,MA,COST,PEP,KO,XOM,CVX,UNH,JNJ,WMT,HD,PG,DIS,BA,CAT,CRM,ORCL,ADBE,QCOM}
+      - SCOUT_INTAKE_PROVIDERS=${SCOUT_INTAKE_PROVIDERS:-google-news-rss}
+      - SCOUT_INTAKE_BATCH_SIZE=${SCOUT_INTAKE_BATCH_SIZE:-5}
+      - SCOUT_INTAKE_SLOT_SECONDS=${SCOUT_INTAKE_SLOT_SECONDS:-14400}
+      - SCOUT_MAX_BAR_AGE_DAYS=${SCOUT_MAX_BAR_AGE_DAYS:-7}
+      - SCOUT_MAX_RUN_AGE_SECONDS=${SCOUT_MAX_RUN_AGE_SECONDS:-43200}
+      # Direct official FOMC calendar collector. Explicitly opt in; no read path invokes it.
+      - FEDERAL_RESERVE_ENABLED=${FEDERAL_RESERVE_ENABLED:-false}
+      # Phase 2 — direct official calendar sources. All keyless, all gated with NO default, all
+      # additionally requiring EVENTS_CONTACT_UA below. With an empty `.env` none of them opens a
+      # socket, which is what invariant #1's keyless half requires.
+      - BLS_ENABLED=${BLS_ENABLED:-false}
+      - BEA_ENABLED=${BEA_ENABLED:-false}
+      - COMPANY_IR_ENABLED=${COMPANY_IR_ENABLED:-false}
+      # Coverage is data: this optional JSON file adds or corrects company IR sources with no code
+      # change. Unset ⇒ the built-in registry (NVIDIA) alone.
+      - COMPANY_IR_REGISTRY_PATH=${COMPANY_IR_REGISTRY_PATH:-}
+      # Phase 3 — optional reference relationships, appended to the built-ins. Unset ⇒ built-ins
+      # only. Nothing here is model-generated; every entry must carry a reason and a citation.
+      - RELATIONSHIP_REGISTRY_PATH=${RELATIONSHIP_REGISTRY_PATH:-}
+      # Phase 4 — post-event reaction capture. Reads bars over HTTP from ANALYSIS_URL (§9.25)
+      # and nowhere else; never a provider, never a quote. Off by default.
+      - REACTION_CAPTURE_ENABLED=${REACTION_CAPTURE_ENABLED:-false}
+      - REACTION_CAPTURE_LIMIT=${REACTION_CAPTURE_LIMIT:-100}
+      # The sample floor below which NO statistic is reported at all.
+      - REACTION_MIN_SAMPLE=${REACTION_MIN_SAMPLE:-12}
+      # Phase 2D — how many 8-K bodies a pass may retrieve so the deterministic planned-event
+      # extractor has text to read. 0 keeps SEC EDGAR's request count exactly as it was.
+      - SEC_BODY_FETCH_LIMIT=${SEC_BODY_FETCH_LIMIT:-0}
+      # Provider keys — ALL optional, unread until Wave 1C. With none set the service still runs.
+      - ALPHAVANTAGE_API_KEY=${ALPHAVANTAGE_API_KEY:-}
+      - MARKETAUX_API_KEY=${MARKETAUX_API_KEY:-}
+      - FRED_API_KEY=${FRED_API_KEY:-}
+      - FMP_API_KEY=${FMP_API_KEY:-}
+      # Per-provider events-ingestion allocations. These feed budget.reserve and the operator
+      # monitor; they deliberately do not claim gateway/prediction calls.
+      - EVENTS_BUDGET_MARKETAUX=${EVENTS_BUDGET_MARKETAUX:-80}
+      - EVENTS_BUDGET_SEC_EDGAR=${EVENTS_BUDGET_SEC_EDGAR:-500}
+      - EVENTS_BUDGET_GOOGLE_NEWS_RSS=${EVENTS_BUDGET_GOOGLE_NEWS_RSS:-250}
+      - EVENTS_BUDGET_ALPHAVANTAGE=${EVENTS_BUDGET_ALPHAVANTAGE:-20}
+      - EVENTS_BUDGET_FRED=${EVENTS_BUDGET_FRED:-500}
+      - EVENTS_BUDGET_FMP=${EVENTS_BUDGET_FMP:-200}
+      - EVENTS_BUDGET_FEDERAL_RESERVE=${EVENTS_BUDGET_FEDERAL_RESERVE:-50}
+      - EVENTS_BUDGET_BLS=${EVENTS_BUDGET_BLS:-40}
+      - EVENTS_BUDGET_BEA=${EVENTS_BUDGET_BEA:-40}
+      - EVENTS_BUDGET_COMPANY_IR=${EVENTS_BUDGET_COMPANY_IR:-100}
+      # §9.45: the events service has its OWN contact gate, not the gateway's SEC_USER_AGENT.
+      # Compose hands one .env to every service and the gateway's copy must stay populated, so
+      # sharing the name meant an "empty" .env still built a persistent cross-user corpus.
+      # No default: absent or blank => SEC EDGAR and Google News RSS both skip, both labelled.
+      - EVENTS_CONTACT_UA=${EVENTS_CONTACT_UA:-}
+    depends_on:
+      analysis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  gateway:
+    build: ./gateway
+    ports: [ "8080:8080" ]
+    environment:
+      - PORT=8080
+      - ANALYSIS_URL=http://analysis:8001
+      - LLM_URL=http://llm:8002
+      - PREDICTION_URL=http://prediction:8003
+      # configurable ticker universe for the frontend switcher (first = default)
+      - TICKERS=${TICKERS:-NVDA,GOOGL,TSLA}
+      # Phase 2 live data (optional); omit to serve verified seed data
+      - ALPHAVANTAGE_API_KEY=${ALPHAVANTAGE_API_KEY:-}
+      - MARKETAUX_API_KEY=${MARKETAUX_API_KEY:-}
+      # StockTwits crowd sentiment — keyless, additive, fail-silent, descriptive (NOT a signal)
+      - STOCKTWITS_ENABLED=${STOCKTWITS_ENABLED:-true}
+      - STOCKTWITS_BASE=${STOCKTWITS_BASE:-https://api.stocktwits.com/api/2}
+      # AI Market Brief — LLM synthesis of the day's collected facts (grounded, non-prescriptive).
+      - BRIEF_TTL=${BRIEF_TTL:-30m}
+      # AI assistant note (cached) + grounded chat (never cached). Range is computed by analysis, not the LLM.
+      - ASSISTANT_TTL=${ASSISTANT_TTL:-90s}
+      # Analyst committee (agent pipeline) — on-demand only, many sequential LLM calls; cache hard.
+      - COMMITTEE_TTL=${COMMITTEE_TTL:-30m}
+      # Research features: thesis checks run with the brief (theses live in the journal service);
+      # the news digest is cached like the brief.
+      - JOURNAL_URL=http://journal:8096
+      # Read-only stale-thesis marker proxy. Alerts is additive and not a hard dependency; failures
+      # degrade to `available:false` rather than breaking the gateway.
+      - ALERTS_URL=http://alerts:8095
+      - DIGEST_TTL=${DIGEST_TTL:-30m}
+      # Accounts: verify the session cookie locally (same AUTH_SECRET as auth/journal/alerts/llm) to
+      # forward X-User-Id to the llm and require a user for persona mutations.
+      - AUTH_SECRET=${AUTH_SECRET:-dev-insecure-change-me}
+      # Who may START price/PEAD evaluation or forward-estimate collection from the app. Comma-separated
+      # AUTH USER IDS (GET /auth/me -> user.id), NEVER emails. EMPTY = NOBODY — the FEEDBACK_ADMIN_UIDS
+      # fail-closed shape (D-16): a minutes-long CPU-heavy job that slows /predict for everyone is not
+      # an any-user action. Reading GET /api/evaluate/status needs only a signed-in session, and the
+      # run itself takes no parameters (docs/PAPER_EXECUTION_CONTRACT.md §4.3).
+      - EVAL_ADMIN_UIDS=${EVAL_ADMIN_UIDS:-}
+      # Deliberately NOT in depends_on: an unavailable corpus degrades event/calendar sections to
+      # honest empty states while the rest of the gateway remains available offline.
+      - EVENTS_URL=http://events:8004
+    depends_on: [ analysis, llm, prediction ]
+
+  # Alerts: descriptive rule evaluation + notifications. Standard-library-only Go. Optional webhook/
+  # SMTP; the in-app events feed always works. Runs with zero keys (fires on synthetic data too).
+  alerts:
+    build: ./alerts
+    ports: [ "8095:8095" ]
+    environment:
+      - PORT=8095
+      - ANALYSIS_URL=http://analysis:8001
+      - GATEWAY_URL=http://gateway:8080
+      - TICKERS=${TICKERS:-NVDA,GOOGL,TSLA}
+      - EVAL_INTERVAL=${EVAL_INTERVAL:-60s}
+      - RULES_DIR=/data/alerts
+      - ALERTS_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - ALERTS_DATABASE_SCHEMA=alerts
+      # Optional notifications (generic/Slack/Discord webhook + SMTP email). Omit to use in-app only.
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - ALERT_EMAIL_TO=${ALERT_EMAIL_TO:-}
+      # Accounts: rules + events are per user; verify the same session cookie locally.
+      - AUTH_SECRET=${AUTH_SECRET:-dev-insecure-change-me}
+      - COOKIE_NAME=${COOKIE_NAME:-nvda_session}
+      # Deterministic stale-thesis detection. The producer is separate from the LLM worker and is
+      # also off by default because it fans out across followed tickers.
+      - THESIS_MONITOR_ENABLED=${THESIS_MONITOR_ENABLED:-false}
+      - THESIS_MONITOR_INTERVAL=${THESIS_MONITOR_INTERVAL:-15m}
+      - JOURNAL_URL=http://journal:8096
+    volumes:
+      - alerts:/data/alerts # one-time legacy import + explicit no-DB fallback
+    depends_on:
+      analysis:
+        condition: service_started
+      gateway:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  # Trade journal: a manual RECORD of trades you made yourself — log entries/exits, track P&L and
+  # performance stats, attach the read that was live at entry. It executes
+  # nothing (no broker, no orders) and gives no advice. Works with zero keys.
+  journal:
+    build: ./journal
+    ports: [ "8096:8096" ]
+    environment:
+      - PORT=8096
+      - ANALYSIS_URL=http://analysis:8001
+      - GATEWAY_URL=http://gateway:8080
+      - LLM_URL=http://llm:8002
+      - TRADES_DIR=/data/journal
+      # All trade, research, portfolio, onboarding and analytics records use this schema.
+      - JOURNAL_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - JOURNAL_DATABASE_SCHEMA=journal
+      # Accounts: trades + theses are per user; verify the same session cookie locally.
+      - AUTH_SECRET=${AUTH_SECRET:-dev-insecure-change-me}
+      # Phase 3. The canonical event store, read ONLY for the store-backed relationship view the
+      # event-impact reviews join against. The journal never writes to it, and a read of it cannot
+      # reach a provider — the events service refuses to fetch on a read path.
+      - EVENTS_URL=http://events:8004
+      - COOKIE_NAME=${COOKIE_NAME:-nvda_session}
+    volumes:
+      - journal:/data/journal # one-time legacy import + explicit no-DB fallback
+    depends_on:
+      analysis:
+        condition: service_started
+      gateway:
+        condition: service_started
+      llm:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  # Paper trading: the VALIDATION layer. Runs the validated signal as a PER-BAR ALLOCATION RULE —
+  # the same rule the walk-forward backtest scores — reconciling its SIMULATED position once per
+  # trading session (open / close / flip / hold), and reports live paper performance next to that
+  # backtest. There is no fixed holding period: `horizon` names the model's LABEL horizon, not a
+  # hold. The normative rule is docs/PAPER_EXECUTION_CONTRACT.md.
+  # FAIL-CLOSED: nothing opens or flips unless the data is real and fresh, the model's backtest
+  # passes, AND the offline evaluator recorded an EDGE verdict for the current strategy. No EDGE
+  # verdict exists today, so it trades nothing and says why at GET /paper/status. It also only ever
+  # decides on a COMPLETED bar, and only fills at a quote whose source is known and whose `asOf` is
+  # not older than the bar it reconciles.
+  # SIMULATION ONLY — no execution, no broker, no money. Paper trades are written to the journal
+  # with mode="paper", kept separate from live P&L.
+  paper:
+    build: ./paper
+    ports: [ "8097:8097" ]
+    environment:
+      - PORT=8097
+      - PREDICTION_URL=http://prediction:8003
+      - ANALYSIS_URL=http://analysis:8001
+      - JOURNAL_URL=http://journal:8096
+      - CONFIGS=${PAPER_CONFIGS:-NVDA:1D:5,GOOGL:1D:5,TSLA:1D:5}
+      - EVAL_INTERVAL=${PAPER_EVAL_INTERVAL:-5m}
+      # The simulated book's opening balance (docs/PAPER_EXECUTION_CONTRACT.md §5.2). FAKE MONEY:
+      # there is no account, no broker and no balance anybody can withdraw. Returns are scale-free,
+      # so this number changes no statistic the service reports.
+      - PAPER_STARTING_CASH=${PAPER_STARTING_CASH:-100000}
+      - DATA_DIR=/data/paper
+      # Engine cursor/pending state plus the fake-money ledger, fills, snapshots and reset archive.
+      - PAPER_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - PAPER_DATABASE_SCHEMA=paper
+      # TESTING/DEMO ONLY, REDEFINED: no longer a bar LENGTH. Bar identity comes from the analysis
+      # service's own bar timestamps (docs/PAPER_EXECUTION_CONTRACT.md §2); when > 0, every
+      # EVAL_INTERVAL tick is counted as a new bar so a demo can fast-forward. 0 = real bars only.
+      - PAPER_BAR_SECONDS=${PAPER_BAR_SECONDS:-0}
+      # Freshness gate (contract §4, gate 2). Sessions are approximated by weekdays — conservative
+      # on purpose, so stale data is refused slightly early rather than slightly late.
+      - PAPER_MAX_BAR_AGE_SESSIONS=${PAPER_MAX_BAR_AGE_SESSIONS:-3}
+      - PAPER_MAX_MODEL_AGE_SESSIONS=${PAPER_MAX_MODEL_AGE_SESSIONS:-10}
+      # The engine's service credential (D-20 interim (a)) AND the verifier for this service's two
+      # MUTATING routes (POST /paper/reset, POST /paper/config). It was omitted here entirely, which
+      # meant two things at once in the compose deployment: the journal rejected every simulated
+      # trade with 401 (so Journal -> Experiments showed a permanently empty book), and the two
+      # routes that delete every paper trade / rewrite what the engine trades were reachable by
+      # anyone who could reach the port. With no secret those routes now return 403 naming it.
+      - AUTH_SECRET=${AUTH_SECRET:-dev-insecure-change-me}
+      - COOKIE_NAME=${COOKIE_NAME:-nvda_session}
+      # The dedicated SYSTEM user the engine records its simulated trades as — never a person's id.
+      - PAPER_SYSTEM_UID=${PAPER_SYSTEM_UID:-paper-engine}
+      # Exact browser-origin allow-list for the two authenticated POSTs, EMPTY BY DEFAULT (= no CORS
+      # headers at all). This service is reached same-origin in every shipped deployment; the
+      # `Access-Control-Allow-Origin: *` it used to answer was forbidden by browsers alongside
+      # credentials, so it advertised access the POSTs could never actually be given.
+      - CORS_ORIGINS=${PAPER_CORS_ORIGINS:-}
+    volumes:
+      # File fallback and one-time import of the pre-PostgreSQL engine/ledger records.
+      - paper:/data/paper
+    depends_on:
+      prediction:
+        condition: service_started
+      analysis:
+        condition: service_started
+      journal:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  # Tester feedback: submissions (rating/category/message + auto context snapshot) and admin triage
+  # (new -> reviewed -> resolved). PostgreSQL-backed Go service. Submissions are
+  # user-owned: every route but /health needs a signed-in session, reads are scoped to the caller, and
+  # the global read/summary/triage/delete surface is the FEEDBACK_ADMIN_UIDS allow-list only (D-16).
+  feedback:
+    build: ./feedback
+    ports: [ "8098:8098" ]
+    environment:
+      - PORT=8098
+      - FEEDBACK_DIR=/data/feedback
+      - FEEDBACK_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - FEEDBACK_DATABASE_SCHEMA=feedback
+      # Accounts: submissions are per user; verify the same session cookie locally (no network hop).
+      - AUTH_SECRET=${AUTH_SECRET:-dev-insecure-change-me}
+      - COOKIE_NAME=${COOKIE_NAME:-nvda_session}
+      # Cookies => exact CORS allow-list (no wildcard). Add your prod web origin here.
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:4173}
+      # Comma-separated AUTH USER IDS (not emails) allowed to read every submission, read the summary,
+      # triage and delete. EMPTY = nobody is an admin and those routes fail closed — which is the
+      # zero-config default. Testers can still sign in, submit, and read their own feedback.
+      # Get an id from the auth service (GET /auth/me -> user.id) once the account exists.
+      - FEEDBACK_ADMIN_UIDS=${FEEDBACK_ADMIN_UIDS:-}
+    volumes:
+      - feedback:/data/feedback # one-time legacy import + explicit no-DB fallback
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Accounts: email + PBKDF2 hash in PostgreSQL + HMAC-signed session cookies that every other
+  # service verifies with the SAME AUTH_SECRET (no network hop). Accounts only SCOPE user data — no
+  # verdicts, no execution. Google OAuth is DEFERRED behind
+  # GOOGLE_CLIENT_ID; unset, the button shows a "coming soon" toast. Runs with zero keys / zero network.
+  auth:
+    build: ./auth
+    ports: [ "8099:8099" ]
+    environment:
+      - PORT=8099
+      - USERS_DIR=/data/auth
+      # Accounts and preferences. Auth owns this schema; password hashes never leave it.
+      - AUTH_DATABASE_URL=postgresql://attestel:attestel@postgres:5432/attestel_events
+      - AUTH_DATABASE_SCHEMA=auth
+      # MUST match the value set on gateway/journal/alerts/llm. A dev default is used when unset (the
+      # service logs a WARNING). Set a long random value in the root .env before exposing beyond localhost.
+      - AUTH_SECRET=${AUTH_SECRET:-dev-insecure-change-me}
+      # Google OAuth (Authorization Code flow). Set BOTH id + secret to wire it; empty -> /auth/google
+      # returns 501 and the button shows "coming soon". GOOGLE_REDIRECT_URL must equal the Console
+      # redirect URI byte-for-byte; APP_URL is where the browser lands after login.
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_REDIRECT_URL=${GOOGLE_REDIRECT_URL:-http://localhost:8099/auth/google/callback}
+      - APP_URL=${APP_URL:-http://localhost:5173}
+      # Cookies => exact CORS allow-list (no wildcard). Add your prod web origin here.
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:5173,http://localhost:4173}
+    volumes:
+      - users:/data/auth # one-time legacy import + explicit no-DB local fallback
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - ./web:/app
+    ports: [ "5173:5173" ]
+    environment:
+      - VITE_GATEWAY_URL=http://localhost:8080
+      - VITE_ALERTS_URL=http://localhost:8095
+      - VITE_JOURNAL_URL=http://localhost:8096
+      - VITE_PAPER_URL=http://localhost:8097
+      - VITE_FEEDBACK_URL=http://localhost:8098
+      - VITE_AUTH_URL=http://localhost:8099
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    depends_on: [ gateway, alerts, journal, paper, feedback, auth ]
+
+volumes:
+  reads:
+  postgres-events:
+  alerts:
+  journal:
+  models:
+  eval:
+  paper:
+  feedback:
+  users:

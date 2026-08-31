@@ -1,0 +1,14 @@
+[
+  {
+    "id": "d0d0d0d0d0d0d0d0",
+    "schemaVersion": 2,
+    "ticker": "NVDA",
+    "claim": "Inference demand outgrows training demand by the end of next year.",
+    "text": "STALE MIRROR: inference demand outgrows training demand.",
+    "status": "active",
+    "horizon": "quarters",
+    "confidence": 60,
+    "createdAt": 1752000000,
+    "updatedAt": 1752100000
+  }
+]

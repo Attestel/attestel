@@ -1,0 +1,18 @@
+# Test-only dependencies for services/llm. NOT installed into the runtime image — `Dockerfile`
+# installs `requirements.txt` alone, and nothing here may be imported by `app/`.
+#
+# Why this file exists: two tests (`test_analyst.py::test_two_concurrent_analyst_posts_serialise_
+# across_processes`, `test_analyst_router_seam.py::test_the_analyst_route_rejects_a_get`) drive the
+# service through `starlette.testclient.TestClient`, which imports `httpx` and raises a RuntimeError
+# without it. `httpx` was declared nowhere, so those two tests could never pass in a clean checkout
+# and were red in every local venv that had not happened to acquire it — a suite with two
+# permanently red tests trains its readers to see red as normal.
+#
+# `pytest` is listed for the same reason: the suite cannot run without it and nothing said so.
+#
+# NOTE for whoever standardises this: `services/analysis`, `services/events` and
+# `services/prediction` have the same undeclared-test-dependency shape and no dev file. Only the
+# service whose tests were actually failing is fixed here; the pattern is deliberately not spread
+# across four services in a preflight commit.
+pytest==9.1.1
+httpx==0.28.1

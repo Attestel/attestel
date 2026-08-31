@@ -1,0 +1,682 @@
+# Attestel CI/CD.
+#
+# The repo is a polyglot monorepo — 6 stdlib-and-pgx Go services, 4 FastAPI services, one Vite web
+# app — so a single flat "run everything" pipeline would be both slow and uninformative. Instead:
+#
+#   changes  → decides what actually needs to run, from the diff
+#   syntax   → the cheap parse-everything gate (YAML/JSON/shell/Python/Go formatting)
+#   guards   → the CONTRIBUTING.md discipline rules that a grep can actually enforce
+#   go/python/web → the real suites, fanned out per module, against a real PostgreSQL
+#   docker   → every image builds; on main they are published to GHCR
+#   ci       → the one aggregate status to mark "required" in branch protection
+#
+# WHY A REAL POSTGRES SERVICE. Every DB-backed suite here skips itself when its own
+# `*_TEST_DATABASE_URL` is unset (`journal/store_postgres_test.go:16`, the two Python conftests,
+# and the `skipif`s in llm/prediction). Locally that is a kindness; in CI it would mean the
+# persistence layer is never tested at all while the run stays green — the worst possible
+# combination. So CI sets those variables and the tests run for real. Each suite isolates itself
+# into a per-test schema and drops it afterwards, so one database serves the whole matrix.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Nightly, for the advisory feeds and CodeQL. These find things without the code changing,
+    # which is exactly why they cannot live on the PR path (see the `advisories` job).
+    - cron: '17 4 * * *'
+
+# A new push to a PR makes the previous run's answer worthless; on main every commit's answer is
+# kept, because that is the history someone will bisect.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.24'
+  PYTHON_VERSION: '3.11'   # services/events has a hard >=3.10 floor; the images are all 3.11
+  NODE_VERSION: '20'
+  # NOTE: the PostgreSQL image is pinned inline in each `services:` block rather than here — the
+  # `env` context is not available to `jobs.<id>.services.<id>.image`. It is postgres:16-alpine in
+  # both places, matching docker-compose.yml: testing on a different major than production runs is
+  # a way to hear about a behaviour change from your users rather than from CI.
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # What changed. Emits JSON matrices consumed by the jobs below; an empty matrix skips its job.
+  #
+  # Deliberately a plain script rather than a path-filter action: the rule "shared plumbing
+  # invalidates every filter" is the part that actually matters, and it is easier to read — and to
+  # trust — as six lines of shell than as a YAML dialect.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  changes:
+    name: what changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      go: ${{ steps.select.outputs.go }}
+      python: ${{ steps.select.outputs.python }}
+      web: ${{ steps.select.outputs.web }}
+      docker: ${{ steps.select.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the diff needs both ends present
+
+      - id: select
+        name: select the affected components
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          GO_MODULES="alerts auth feedback gateway journal paper"
+          PY_SERVICES="analysis events llm prediction"
+
+          case "$EVENT" in
+            pull_request) base="$BASE_SHA" ;;
+            push)         base="$BEFORE_SHA" ;;
+            *)            base="" ;;   # dispatch / schedule: no diff to speak of, run everything
+          esac
+
+          # An unusable base (first push of a branch, a force-push, a fresh clone depth) must widen
+          # the run, never narrow it. A filter that fails open is a filter that hides a broken build.
+          all=0
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            all=1
+            changed=""
+            echo "no usable base ref — running every component"
+          else
+            changed="$(git diff --name-only "$base" "$HEAD_SHA")"
+            echo "changed files:"; printf '%s\n' "$changed" | sed 's/^/  /'
+          fi
+
+          # Shared plumbing: touching any of this can break any component, so it invalidates
+          # every filter. Including this workflow itself — a CI change must be tested by CI.
+          if [ "$all" -eq 0 ] && printf '%s\n' "$changed" | grep -qE '^(\.github/|Makefile|scripts/|deploy/|Dockerfile|docker-compose\.yml|\.dockerignore)'; then
+            all=1
+            echo "shared plumbing changed — running every component"
+          fi
+
+          selected() {  # selected <path-prefix>
+            [ "$all" -eq 1 ] && return 0
+            printf '%s\n' "$changed" | grep -q "^$1"
+          }
+
+          go_sel=""; for m in $GO_MODULES;  do selected "$m/"          && go_sel="$go_sel $m"; done
+          py_sel=""; for s in $PY_SERVICES; do selected "services/$s/" && py_sel="$py_sel $s"; done
+          web_sel=""; selected "web/" && web_sel="web"
+
+          to_json() { printf '%s\n' $@ | jq -Rc 'select(length>0)' | jq -sc .; }
+
+          go_json="$(to_json $go_sel)"
+          py_json="$(to_json $py_sel)"
+
+          # Image matrix. The all-in-one image at the repo root is the single-container deploy
+          # artifact — it restages every Go binary, every Python service and the built bundle — so
+          # anything that builds at all rebuilds it.
+          docker_json="$(
+            {
+              for m in $go_sel; do jq -nc --arg n "$m" '{name:$n, context:$n, file:($n + "/Dockerfile")}'; done
+              for s in $py_sel; do jq -nc --arg n "$s" '{name:$n, context:("services/" + $n), file:("services/" + $n + "/Dockerfile")}'; done
+              if [ -n "${go_sel}${py_sel}${web_sel}" ]; then
+                jq -nc '{name:"all-in-one", context:".", file:"Dockerfile"}'
+              fi
+            } | jq -sc .
+          )"
+
+          {
+            echo "go=$go_json"
+            echo "python=$py_json"
+            echo "web=${web_sel:+true}"
+            echo "docker=$docker_json"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "go=$go_json  python=$py_json  web=${web_sel:-none}"
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # Does everything still parse. Runs unconditionally and finishes in about a minute, so a broken
+  # YAML or an unterminated string is reported before anyone waits on a test matrix.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  syntax:
+    name: syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false   # nothing is compiled here; a cache restore would cost more than it saves
+
+      - name: YAML parses
+        run: |
+          set -euo pipefail
+          pip install --quiet pyyaml
+          python - <<'PY'
+          import sys, pathlib, yaml
+          bad = 0
+          for p in sorted(pathlib.Path('.').rglob('*.y*ml')):
+              if '.git/' in str(p) or 'node_modules' in str(p):
+                  continue
+              try:
+                  list(yaml.safe_load_all(p.read_text()))
+                  print(f"  ok   {p}")
+              except yaml.YAMLError as e:
+                  print(f"  FAIL {p}: {e}", file=sys.stderr); bad += 1
+          sys.exit(1 if bad else 0)
+          PY
+
+      - name: JSON parses
+        run: |
+          set -euo pipefail
+          rc=0
+          # Registry files and golden shapes are loaded at runtime, not compiled — a trailing comma
+          # in one of them is a production 500, and this is the only place it gets caught.
+          #
+          # Except the fixtures that are invalid ON PURPOSE. `journal/testdata/theses/malformed.json`
+          # is a truncated-mid-write file, and `journal/theses_test.go` exists to prove that reading
+          # it does not silently replace a user's theses. Repairing it to satisfy this gate would
+          # delete the test. So the exemption is by naming convention, and it is narrow: only under
+          # a testdata/ directory, only a file that says in its name what it is.
+          while IFS= read -r f; do
+            case "$f" in
+              *testdata/*malformed*|*testdata/*invalid*|*testdata/*corrupt*)
+                echo "  skip $f (deliberately invalid fixture)"; continue ;;
+            esac
+            python -c "import json,sys; json.load(open(sys.argv[1]))" "$f" \
+              && echo "  ok   $f" || { echo "  FAIL $f" >&2; rc=1; }
+          done < <(git ls-files '*.json')
+          exit $rc
+
+      - name: shell scripts parse and lint
+        run: |
+          set -euo pipefail
+          mapfile -t scripts < <(git ls-files '*.sh')
+          for s in "${scripts[@]}"; do bash -n "$s"; done
+          # shellcheck ships on the runner image. -x follows sourced files.
+          # --severity=error keeps this a correctness gate: the existing scripts were written
+          # before it ran, and a pipeline that opens red on style has taught its first lesson
+          # badly. Tighten to `warning` once they are clean under it.
+          shellcheck -x --severity=error "${scripts[@]}"
+
+      - name: Python parses, and has no undefined names
+        run: |
+          set -euo pipefail
+          python -m compileall -q services scripts
+          pip install --quiet ruff
+          # Errors only — E9 (syntax), F63/F7 (broken constructs), F82 (undefined name). This is a
+          # correctness gate, not a style gate: the house style is set by the surrounding code and
+          # reviewed by people, and a linter that reformats this codebase's comments would do harm.
+          ruff check --select E9,F63,F7,F82 --output-format=github services scripts
+
+      - name: Go is gofmt-clean
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l alerts auth feedback gateway journal paper)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would rewrite these files:"; printf '%s\n' "$unformatted"
+            gofmt -d $unformatted
+            exit 1
+          fi
+
+      - name: docker-compose.yml is a valid compose file
+        run: docker compose -f docker-compose.yml config --quiet
+
+      - name: .env.example declares no key twice
+        run: |
+          set -euo pipefail
+          # A duplicate key in a 32k example file is invisible in review and silently wins on the
+          # second occurrence, which makes a documented default a lie.
+          dupes="$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' .env.example | cut -d= -f1 | sort | uniq -d)"
+          if [ -n "$dupes" ]; then
+            echo "::error::.env.example defines these keys more than once:"; printf '%s\n' "$dupes"
+            exit 1
+          fi
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # The discipline rules from CONTRIBUTING.md that are mechanically checkable. Each one here is a
+  # rule that was written down because it had already been broken once; a rule enforced only by
+  # review is a rule that is enforced only until the reviewer is busy.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  guards:
+    name: discipline guards
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: rule 5 — the gateway is standard-library-only Go
+        run: |
+          set -euo pipefail
+          if grep -qE '^\s*require|^\s*replace' gateway/go.mod; then
+            echo "::error file=gateway/go.mod::gateway/go.mod must have zero dependencies (CONTRIBUTING rule 5)"
+            grep -nE '^\s*require|^\s*replace' gateway/go.mod
+            exit 1
+          fi
+          if [ -s gateway/go.sum ]; then
+            echo "::error file=gateway/go.sum::gateway/go.sum is non-empty — something was added to a stdlib-only module"
+            exit 1
+          fi
+          echo "gateway: stdlib only"
+
+      - name: rule 4 — the single-pass workers contain no timer
+        run: |
+          set -euo pipefail
+          # These are the processes that are permitted to call the model. Each must drain a bounded
+          # batch and exit; a `while True` or a `time.sleep` turns an operator command into a
+          # scheduler, which is precisely what invariant #4 forbids.
+          workers="services/llm/app/enrich_worker.py services/llm/app/thesis_resynth.py"
+          rc=0
+          for w in $workers; do
+            [ -f "$w" ] || { echo "::error::$w is missing — update this guard if it was renamed"; rc=1; continue; }
+            if grep -nE 'while\s+True|time\.sleep' "$w"; then
+              echo "::error file=$w::a loop or sleep in a single-pass worker (CONTRIBUTING rule 4)"
+              rc=1
+            fi
+          done
+          exit $rc
+
+      - name: server-owned importance bands are not copied into the client
+        # scripts/check-band-parity.sh — the mirror image of check-web-bundle. Source-level, so it
+        # needs no build and can run here rather than behind the web job.
+        run: ./scripts/check-band-parity.sh web/src gateway/feeds.go
+
+      - name: no .env, key or certificate is committed
+        run: |
+          set -euo pipefail
+          # .gitignore covers .env, but .gitignore does not un-commit a file that beat it there.
+          leaked="$(git ls-files \
+            | grep -E '(^|/)\.env$|(^|/)\.env\.[A-Za-z0-9_.-]+$|\.pem$|\.p12$|(^|/)id_rsa' \
+            | grep -vE '\.env\.example$' || true)"
+          if [ -n "$leaked" ]; then
+            echo "::error::these look like secrets and are tracked in git:"; printf '%s\n' "$leaked"
+            exit 1
+          fi
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # Go: one job per module, each against a real PostgreSQL.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  go:
+    name: go / ${{ matrix.module }}
+    needs: changes
+    if: needs.changes.outputs.go != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false   # one module's failure must not hide another's
+      matrix:
+        module: ${{ fromJSON(needs.changes.outputs.go) }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: attestel
+          POSTGRES_PASSWORD: attestel
+          POSTGRES_DB: attestel_events
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U attestel -d attestel_events"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Every module reads only its own variable; setting all of them keeps this job free of a
+      # per-module conditional that would be one more thing to forget when a service is added.
+      ALERTS_TEST_DATABASE_URL:   postgresql://attestel:attestel@localhost:5432/attestel_events
+      AUTH_TEST_DATABASE_URL:     postgresql://attestel:attestel@localhost:5432/attestel_events
+      FEEDBACK_TEST_DATABASE_URL: postgresql://attestel:attestel@localhost:5432/attestel_events
+      JOURNAL_TEST_DATABASE_URL:  postgresql://attestel:attestel@localhost:5432/attestel_events
+      PAPER_TEST_DATABASE_URL:    postgresql://attestel:attestel@localhost:5432/attestel_events
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+
+      - name: go.mod is tidy
+        working-directory: ${{ matrix.module }}
+        # -diff exits non-zero and prints the patch instead of writing it, which is what a check
+        # wants: CI reports, the author decides.
+        run: go mod tidy -diff
+
+      - name: go vet
+        working-directory: ${{ matrix.module }}
+        run: go vet ./...
+
+      - name: build
+        working-directory: ${{ matrix.module }}
+        run: go build -trimpath ./...
+
+      - name: test
+        working-directory: ${{ matrix.module }}
+        # -race because every one of these services is an HTTP handler over shared state.
+        # -shuffle=on because a suite that only passes in declaration order is a suite with a
+        # hidden dependency between tests, and this is where it surfaces cheaply.
+        run: go test -race -shuffle=on -covermode=atomic -coverprofile=coverage.out ./...
+
+      - name: coverage
+        working-directory: ${{ matrix.module }}
+        run: |
+          set -euo pipefail
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')"
+          echo "### go / ${{ matrix.module }} — coverage $total" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-go-${{ matrix.module }}
+          path: ${{ matrix.module }}/coverage.out
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # Python: one job per FastAPI service, on the same interpreter its image ships.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  python:
+    name: python / ${{ matrix.service }}
+    needs: changes
+    if: needs.changes.outputs.python != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.python) }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: attestel
+          POSTGRES_PASSWORD: attestel
+          POSTGRES_DB: attestel_events
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U attestel -d attestel_events"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ANALYSIS_TEST_DATABASE_URL:   postgresql://attestel:attestel@localhost:5432/attestel_events
+      EVENTS_TEST_DATABASE_URL:     postgresql://attestel:attestel@localhost:5432/attestel_events
+      LLM_TEST_DATABASE_URL:        postgresql://attestel:attestel@localhost:5432/attestel_events
+      PREDICTION_TEST_DATABASE_URL: postgresql://attestel:attestel@localhost:5432/attestel_events
+    defaults:
+      run:
+        working-directory: services/${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            services/${{ matrix.service }}/requirements.txt
+            services/${{ matrix.service }}/requirements-dev.txt
+
+      - name: install
+        # requirements-dev.txt is the test-only half (pytest + httpx, the latter only because
+        # starlette's TestClient imports it) and is deliberately absent from the runtime images —
+        # so CI installs both files, and the image still installs neither.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: nothing in app/ imports a test-only dependency
+        run: |
+          set -euo pipefail
+          # The contract each requirements-dev.txt states in its header. If app/ ever imports one of
+          # these, the runtime image breaks in production while every test stays green.
+          if grep -rnE '^\s*(import|from)\s+(pytest|httpx)\b' app/; then
+            echo "::error::app/ imports a dependency that is not in requirements.txt"
+            exit 1
+          fi
+
+      - name: compiles
+        run: python -m compileall -q app tests
+
+      - name: pytest
+        # -q matches what CONTRIBUTING documents; --durations surfaces a suite that is quietly
+        # turning into a wall-clock problem before someone starts skipping it locally.
+        run: python -m pytest -q --durations=10
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # Web. `npm run build` is the real check (there is no lint step), and the bundle gate runs on its
+  # output — the one that catches a server-only field rendered inside a collapsed panel.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  web:
+    name: web
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: install
+        working-directory: web
+        run: npm ci
+
+      - name: test
+        working-directory: web
+        run: npm test
+
+      - name: build
+        working-directory: web
+        run: npm run build
+
+      - name: no server-only field reaches the built bundle
+        run: ./scripts/check-web-bundle.sh web/dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 7
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # Images. Every Dockerfile must build; on main the result is published to GHCR, which is the whole
+  # of the CD here — this repo is deployed by pulling an image, and no deploy target is configured
+  # in it, so nothing further is invented.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  docker:
+    name: image / ${{ matrix.image.name }}
+    needs: [changes, guards]
+    if: needs.changes.outputs.docker != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write   # only exercised by the publish step, which is main-only
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.changes.outputs.docker) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: registry namespace
+        id: ns
+        # GHCR rejects uppercase; the owner here is not lowercase.
+        run: echo "repo=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ steps.ns.outputs.repo }}/${{ matrix.image.name }}
+          tags: |
+            type=ref,event=branch
+            type=sha,format=long
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.file }}
+          # A PR proves the image builds; only main publishes one.
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Attestations are only exportable by the registry push, so they are requested on
+          # exactly the runs that publish.
+          provenance: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          sbom: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # THE REQUIRED CHECK. Branch protection points at this one job.
+  #
+  # It exists because the matrices above are conditional: a required check that never runs on a
+  # docs-only PR blocks that PR forever, and "required" on each individual matrix leg would have to
+  # be re-edited every time a service is added. This job runs always, and reads the results.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  ci:
+    name: ci
+    if: always()
+    needs: [changes, syntax, guards, go, python, web, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: verdict
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq -r 'to_entries[] | "  \(.value.result)\t\(.key)"'
+          # 'skipped' is a pass: it means the diff did not touch that component. 'failure' and
+          # 'cancelled' are not — a cancelled job measured nothing, and a gate that cannot observe
+          # the thing it checks reports nothing, never success.
+          if echo "$RESULTS" | jq -e 'to_entries | map(select(.value.result == "failure" or .value.result == "cancelled")) | length > 0' >/dev/null; then
+            echo "::error::at least one required job did not pass"
+            exit 1
+          fi
+          echo "all required jobs passed or were not applicable"
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # Advisory scanning — NOT part of the `ci` verdict, on purpose.
+  #
+  # These jobs change their answer when a feed changes, without a line of this repo changing. Wired
+  # into the PR path they would eventually turn a red build into background noise, which is how a
+  # real finding gets waved through. They run nightly and on main, where a new finding is news
+  # rather than an obstacle between a contributor and their merge.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  advisories:
+    name: advisories
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: govulncheck (Go)
+        run: |
+          set -euo pipefail
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          rc=0
+          for m in alerts auth feedback gateway journal paper; do
+            echo "── $m"
+            # Call-graph aware: it reports a vulnerability only when the vulnerable symbol is
+            # actually reachable, which is why this is worth reading rather than skimming.
+            ( cd "$m" && govulncheck ./... ) || rc=1
+          done
+          exit $rc
+
+      - name: pip-audit (Python)
+        run: |
+          set -euo pipefail
+          pip install --quiet pip-audit
+          rc=0
+          for s in analysis events llm prediction; do
+            echo "── $s"
+            pip-audit --requirement "services/$s/requirements.txt" || rc=1
+          done
+          exit $rc
+
+      - name: npm audit (web)
+        working-directory: web
+        # --omit=dev: vite and the tailwind plugin never reach a user's browser; an advisory in a
+        # build-time dependency is a different conversation from one in the shipped bundle.
+        run: npm audit --omit=dev --audit-level=high
+
+  # CodeQL. Same reasoning as `advisories` for staying off the PR path — plus it is slow, and three
+  # languages of it on every push would dominate the queue.
+  codeql:
+    name: codeql / ${{ matrix.language }}
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        if: matrix.language == 'go'
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: build the Go modules for analysis
+        if: matrix.language == 'go'
+        # Six independent modules with no go.work, so autobuild finds one of them at best.
+        run: |
+          set -euo pipefail
+          for m in alerts auth feedback gateway journal paper; do ( cd "$m" && go build ./... ); done
+
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}

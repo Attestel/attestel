@@ -1,0 +1,23 @@
+# Test-only dependencies for services/prediction. NOT installed into the runtime image —
+# `Dockerfile` installs `requirements.txt` alone, and nothing here may be imported by `app/`.
+#
+# WHY THIS FILE EXISTS: see the header of `services/analysis/requirements-dev.txt`. The suite could
+# not run in a clean checkout and nothing said so.
+#
+# WHAT THE SUITE ACTUALLY IMPORTS, measured (`grep -rhoE '^\s*(import|from) \w+' tests/*.py`):
+#
+#   pytest        the runner itself — nothing declared it
+#   numpy,        already runtime dependencies in `requirements.txt`, so not repeated here
+#   pandas
+#
+# httpx        NOW REQUIRED. `tests/test_evalrun.py` (the evaluation-runner endpoints) constructs a
+#              `TestClient`, which imports httpx. Until that suite existed not one test here did —
+#              the note this line replaces said so, measured. Nothing in `app/` imports it, so it
+#              stays out of `requirements.txt` and out of the runtime image.
+#
+# INTERPRETER. `services/prediction` needs its own `.venv` for the same reason `analysis` does — the
+# machine's `python3` is 3.9.6 with no pandas. Run `./.venv/bin/python -m pytest -q`.
+#
+# PIN. `pytest==9.1.1` is what produced this suite's green run at Wave 4 integration.
+pytest==9.1.1
+httpx==0.28.1

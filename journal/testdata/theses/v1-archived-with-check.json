@@ -1,0 +1,17 @@
+[
+  {
+    "id": "bb11cc22dd33ee44",
+    "ticker": "NVDA",
+    "text": "The Blackwell ramp slips a quarter and the stock re-rates lower.",
+    "status": "archived",
+    "createdAt": 1740000000,
+    "updatedAt": 1744000000,
+    "lastCheck": {
+      "at": 1744000000,
+      "verdict": "neutral",
+      "summary": "Nothing collected speaks to ramp timing either way.",
+      "watchFor": ["Any dated ramp commitment from management"],
+      "modelUsed": "stub:thesis"
+    }
+  }
+]

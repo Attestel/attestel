@@ -1,0 +1,643 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ *
+ * Self-hosted brand faces — Google Sans (UI) + IBM Plex Mono (numbers,
+ * micro-labels). Bundled by Vite so the app never touches the network
+ * (CLAUDE.md invariant #1). The `--font-*` tokens below still carry a
+ * full system fallback stack if a face fails to load.
+ * ------------------------------------------------------------------ */
+@font-face {
+  font-family: "Google Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("./fonts/google-sans-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Google Sans";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("./fonts/google-sans-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/plex-mono-400-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/plex-mono-400-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/plex-mono-500-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/plex-mono-500-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/plex-mono-600-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/plex-mono-600-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ------------------------------------------------------------------ *
+ * Theme tokens — a MIRROR of `landing/index-24-methodology-svg-icons.html`
+ * `:root`. The landing page is the design source of truth (docs/UX_DIRECTION.md);
+ * changing one without the other is a bug.
+ *
+ * Colour discipline: indigo `accent` means BRAND — focus, active, interactive
+ * emphasis. `up` green and `down` red mean ONLY price direction / positive-
+ * negative state. Never an indigo price, never a green focus ring.
+ *
+ * Exposed as Tailwind utilities: bg-panel, text-muted, text-up, border-line,
+ * rounded-xl, shadow-card, ease-premium, font-mono …
+ * ------------------------------------------------------------------ */
+@theme {
+  /* surfaces */
+  --color-bg: #060708; /* page base */
+  --color-canvas: #0a0b0d; /* inset canvases — chart wells, hero panels */
+  --color-panel: #0e0f13; /* flat panel surface */
+  --color-panel2: #14161b; /* inner chips, inputs, glass base */
+  --color-line: rgba(255, 255, 255, 0.08); /* hairline divider — translucent */
+  --color-line2: rgba(255, 255, 255, 0.16); /* control border */
+
+  /* text */
+  --color-fg: #f4f4f2; /* primary — warm off-white */
+  --color-muted: #9a9ca3; /* secondary */
+  --color-dim: #64666d; /* tertiary / mono micro-labels */
+
+  /* brand + data */
+  --color-accent: #5b6cff; /* BRAND — focus, active, interactive emphasis */
+  --color-accent-deep: #3d4bd6; /* gradient end / pressed */
+  --color-up: #5bc79a; /* price up · strengthened · SEC-filing provenance */
+  --color-down: #e5484d; /* price down · negative */
+  --color-warn: #e0703c; /* warning · challenged · computed-rules provenance */
+  --color-info: #53a0ff; /* market-data provenance */
+  --color-llm: #a78be0; /* AI-synthesis provenance */
+
+  /* provenance glyph tints (icon chips, coloured source text) */
+  --color-prov-filing: #9fdbbf;
+  --color-prov-company: #c9cfff;
+  --color-prov-market: #a5d7ff;
+  --color-prov-computed: #ffc089;
+  --color-prov-ai: #d5b8ff;
+  --color-prov-user: #f4f4f2;
+
+  --font-sans: "Google Sans", "Inter", ui-sans-serif, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", ui-monospace, Menlo, Consolas,
+    monospace;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-2xl: 28px;
+
+  --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 40px 80px -40px rgba(0, 0, 0, 0.9);
+  --shadow-lift: 0 14px 34px rgba(0, 0, 0, 0.4);
+  --shadow-nav: 0 12px 40px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  --shadow-glow: 0 16px 40px -12px rgba(255, 255, 255, 0.25);
+
+  --ease-premium: cubic-bezier(0.16, 0.8, 0.24, 1);
+  --ease-reveal: cubic-bezier(0.2, 0.75, 0.2, 1);
+
+  --breakpoint-xs: 30rem; /* 480px — used by the top-bar timeframe toggle */
+
+  /* motion */
+  --animate-flash-up: flash-up 0.65s ease-out;
+  --animate-flash-down: flash-down 0.65s ease-out;
+  --animate-pulse-live: pulse-live 1.4s ease-in-out infinite;
+  --animate-shimmer: shimmer 1.3s linear infinite;
+}
+
+/* ------------------------------------------------------------------ *
+ * Base reset
+ * ------------------------------------------------------------------ */
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    /* NOTE: the landing leaves body line-height at `normal`; the terminal keeps
+     * 1.5 so dense data rows do not grow. Prose blocks opt into 1.6+ via
+     * `.prose-body` / PageHeader. */
+    line-height: 1.5;
+    font-optical-sizing: auto;
+    font-variation-settings: "GRAD" 0;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  * {
+    box-sizing: border-box;
+  }
+  /* Tabular numerals everywhere a number lives (opt-in via .num) */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+    letter-spacing: -0.01em;
+  }
+  /* Headings adopt the landing's tight, medium-weight display setting. */
+  h1,
+  h2,
+  h3 {
+    font-weight: 550;
+    line-height: 1.04;
+    letter-spacing: -0.03em;
+  }
+  /* Inline SVG icon contract — mirrors the landing's `.method-mark svg` rules so
+   * an icon lifted from the landing renders at identical optical weight. */
+  svg {
+    display: block;
+  }
+  svg * {
+    vector-effect: non-scaling-stroke;
+  }
+  svg [data-stroke] {
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+  }
+  svg [data-fill] {
+    fill: currentColor;
+  }
+  /* Visible, consistent focus ring for keyboard users (WCAG). Indigo = brand. */
+  :focus-visible {
+    outline: 2px solid rgba(91, 108, 255, 0.7);
+    outline-offset: 3px;
+  }
+  ::selection {
+    background: var(--color-accent);
+    color: #fff;
+  }
+  /* Mobile: 16px form controls stop iOS Safari from auto-zooming on focus. Phones only — desktop
+   * keeps the compact look. Control heights already comfortably clear a 16px line. */
+  @media (max-width: 640px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+  /* Custom scrollbars — terminal density */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-panel2);
+    border-radius: 999px;
+    border: 2px solid var(--color-bg);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #232630;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Surface recipes — the landing's glass vocabulary, verbatim.
+ * `.surface-card` = `.pcard`, `.surface-card-blue` = `.claim-card`,
+ * `.surface-deep` = `.method-card`, `.surface-canvas` = `.lens-slide`.
+ * ------------------------------------------------------------------ */
+@layer components {
+  .surface-card,
+  .surface-card-blue,
+  .surface-deep,
+  .surface-canvas {
+    position: relative;
+  }
+
+  .surface-card {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.07),
+      rgba(255, 255, 255, 0.02) 60%
+    );
+    -webkit-backdrop-filter: blur(22px) saturate(1.3);
+    backdrop-filter: blur(22px) saturate(1.3);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 24px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .surface-card-blue {
+    background: radial-gradient(
+        110% 105% at 100% 0%,
+        rgba(91, 108, 255, 0.16),
+        transparent 56%
+      ),
+      linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.075),
+        rgba(255, 255, 255, 0.026) 58%,
+        rgba(255, 255, 255, 0.018)
+      );
+    -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    backdrop-filter: blur(20px) saturate(1.2);
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    border-radius: 24px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .surface-deep {
+    background: linear-gradient(
+      180deg,
+      rgba(20, 22, 27, 0.8),
+      rgba(10, 11, 14, 0.74)
+    );
+    -webkit-backdrop-filter: blur(22px) saturate(1.12);
+    backdrop-filter: blur(22px) saturate(1.12);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 30px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 24px 80px -48px rgba(0, 0, 0, 0.92);
+  }
+
+  .surface-canvas {
+    background: var(--color-canvas);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 28px;
+  }
+
+  /* Top highlight — the tell that separates Attestel glass from a flat panel. */
+  .surface-card::before,
+  .surface-card-blue::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 46%;
+    border-radius: inherit;
+    pointer-events: none;
+    /* z-index -1 keeps the highlight above the surface's own background but BELOW its in-flow
+     * content, so card text is never veiled. Safe because backdrop-filter already makes each
+     * surface a stacking context. */
+    z-index: -1;
+    background: radial-gradient(
+      90% 100% at 50% 0%,
+      rgba(255, 255, 255, 0.09),
+      transparent 75%
+    );
+  }
+  .surface-card-blue::before {
+    height: 48%;
+    background: radial-gradient(
+      88% 100% at 50% 0%,
+      rgba(255, 255, 255, 0.1),
+      transparent 76%
+    );
+  }
+  .surface-deep::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: -1;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.05),
+      transparent 40%
+    );
+  }
+
+  /* The signature micro-label. Mono, 10.5px, .16em, uppercase, dim. */
+  .label-mono {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-dim);
+  }
+
+  /* Floating glass navigation shell (TopBar, launcher pills). */
+  .glass-nav {
+    background: rgba(20, 22, 27, 0.55);
+    -webkit-backdrop-filter: blur(24px) saturate(1.5);
+    backdrop-filter: blur(24px) saturate(1.5);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: var(--shadow-nav);
+  }
+
+  /* Hero canvas — the landing's `.hero-canvas` + `.hero-glow` + `.hero-stars`, used by the
+   * sign-in brand panel so the screen after "Request Access" is the landing's twin. */
+  .hero-canvas {
+    position: relative;
+    overflow: hidden;
+    background: var(--color-canvas);
+    border-radius: 28px;
+  }
+  .hero-glow {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .hero-glow::before {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    background: radial-gradient(
+        52% 44% at 66% 38%,
+        rgba(214, 222, 232, 0.22),
+        transparent 62%
+      ),
+      radial-gradient(38% 34% at 78% 64%, rgba(160, 170, 185, 0.12), transparent 70%),
+      radial-gradient(30% 26% at 30% 78%, rgba(120, 128, 142, 0.07), transparent 70%);
+    filter: blur(6px);
+    animation: glow-drift 22s ease-in-out infinite alternate;
+  }
+  .hero-glow::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+      120% 100% at 50% 40%,
+      transparent 55%,
+      rgba(0, 0, 0, 0.5) 100%
+    );
+  }
+  .hero-stars {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    background-image: radial-gradient(1px 1px at 12% 22%, rgba(255, 255, 255, 0.5), transparent 100%),
+      radial-gradient(1px 1px at 34% 68%, rgba(255, 255, 255, 0.32), transparent 100%),
+      radial-gradient(1.5px 1.5px at 55% 15%, rgba(255, 255, 255, 0.4), transparent 100%),
+      radial-gradient(1px 1px at 71% 82%, rgba(255, 255, 255, 0.3), transparent 100%),
+      radial-gradient(1px 1px at 88% 30%, rgba(255, 255, 255, 0.45), transparent 100%),
+      radial-gradient(1.2px 1.2px at 22% 88%, rgba(255, 255, 255, 0.3), transparent 100%),
+      radial-gradient(1px 1px at 44% 42%, rgba(255, 255, 255, 0.25), transparent 100%),
+      radial-gradient(1.2px 1.2px at 92% 62%, rgba(255, 255, 255, 0.35), transparent 100%);
+  }
+
+  /* Research automation canvas — one quiet workspace, not a grid of dashboard cards. The grid and
+   * violet focus light echo the supplied Xebec reference while staying inside the app's existing
+   * brand tokens. Both layers are inert and disappear under reduced motion. */
+  .investigation-canvas {
+    background: linear-gradient(180deg, rgba(10, 11, 14, 0.96), rgba(6, 7, 8, 0.98));
+  }
+  .investigation-grid {
+    opacity: 0.48;
+    background-image: linear-gradient(rgba(91, 108, 255, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(91, 108, 255, 0.08) 1px, transparent 1px);
+    background-size: clamp(110px, 15vw, 210px) clamp(110px, 15vw, 210px);
+    -webkit-mask-image: radial-gradient(ellipse 86% 78% at 50% 50%, #000 18%, transparent 86%);
+    mask-image: radial-gradient(ellipse 86% 78% at 50% 50%, #000 18%, transparent 86%);
+  }
+  .investigation-glow {
+    background: radial-gradient(42% 32% at 60% 54%, rgba(102, 72, 255, 0.25), transparent 70%),
+      radial-gradient(26% 22% at 42% 52%, rgba(91, 108, 255, 0.12), transparent 78%);
+    filter: blur(14px);
+    animation: investigation-glow 10s ease-in-out infinite alternate;
+  }
+  .research-composer::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background: radial-gradient(48% 90% at 72% 100%, rgba(109, 73, 255, 0.18), transparent 72%);
+  }
+  .research-state-enter {
+    transform-origin: 50% 48%;
+    animation: research-state-enter 520ms var(--ease-premium) both;
+  }
+  .research-orbit {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    border: 1px solid rgba(91, 108, 255, 0.3);
+    border-radius: 999px;
+    box-shadow: 0 0 46px rgba(91, 108, 255, 0.2), inset 0 0 28px rgba(91, 108, 255, 0.1);
+  }
+  .research-orbit::before,
+  .research-orbit::after {
+    content: "";
+    position: absolute;
+    inset: 9px;
+    border: 1px solid rgba(167, 139, 224, 0.34);
+    border-radius: inherit;
+    animation: investigation-orbit 3.8s linear infinite;
+  }
+  .research-orbit::after {
+    inset: 14px;
+    border-color: rgba(244, 244, 242, 0.2);
+    animation-direction: reverse;
+    animation-duration: 2.8s;
+  }
+  .research-orbit > span {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    transform: translate(-50%, -50%);
+    border-radius: 999px;
+    background: var(--color-accent);
+    box-shadow: 0 0 22px rgba(91, 108, 255, 0.95);
+    animation: pulse-live 1.4s ease-in-out infinite;
+  }
+
+  /* Prose measure — the landing's `.sec-body`. Opt-in, so data rows stay dense. */
+  .prose-body {
+    color: var(--color-muted);
+    font-size: 16px;
+    line-height: 1.65;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Keyframes — value flashes, live pulse, skeleton shimmer, glass reveal
+ * ------------------------------------------------------------------ */
+@keyframes flash-up {
+  0% {
+    background-color: rgba(91, 199, 154, 0.32);
+    color: var(--color-up);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@keyframes flash-down {
+  0% {
+    background-color: rgba(229, 72, 77, 0.32);
+    color: var(--color-down);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@keyframes pulse-live {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.82);
+  }
+}
+@keyframes glow-drift {
+  to {
+    transform: translate(-2.5%, 2%) scale(1.05);
+  }
+}
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+@keyframes investigation-glow {
+  to {
+    transform: translate(-3%, 2%) scale(1.08);
+    opacity: 0.78;
+  }
+}
+@keyframes investigation-orbit {
+  to {
+    transform: rotate(360deg) scale(0.96);
+    border-radius: 38% 62% 54% 46%;
+  }
+}
+@keyframes research-state-enter {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+    filter: blur(5px);
+  }
+  58% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.flash-up {
+  animation: var(--animate-flash-up);
+  border-radius: 6px;
+}
+.flash-down {
+  animation: var(--animate-flash-down);
+  border-radius: 6px;
+}
+
+/* Full-height side rail below the 57px top bar. Dynamic viewport height (dvh) so mobile browser
+ * chrome hiding/showing doesn't clip or jump the rail; falls back to vh on older browsers. */
+.rail-h {
+  height: calc(100vh - 57px);
+  height: calc(100dvh - 57px);
+}
+
+/* Skeleton shimmer surface */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-panel2) 0px,
+    #21242c 200px,
+    var(--color-panel2) 400px
+  );
+  background-size: 800px 100%;
+  animation: var(--animate-shimmer);
+}
+
+/* ------------------------------------------------------------------ *
+ * Respect reduced-motion — kill all non-essential animation/transition
+ * ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .flash-up,
+  .flash-down,
+  .skeleton {
+    animation: none !important;
+  }
+  /* Landing-derived reveal/lift effects resolve to their end state. */
+  .hero-glow::before,
+  .hero-stars,
+  .investigation-glow,
+  .research-orbit::before,
+  .research-orbit::after,
+  .research-orbit > span,
+  .orb-nudge {
+    animation: none !important;
+  }
+  .pill-lift:hover,
+  .surface-card:hover,
+  .surface-card-blue:hover {
+    transform: none !important;
+  }
+}

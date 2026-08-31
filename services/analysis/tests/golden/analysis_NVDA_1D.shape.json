@@ -1,0 +1,135 @@
+{
+  "expectedClose": {
+    "atr": "float",
+    "band": "float",
+    "confidence": "str",
+    "high": "float",
+    "label": "str",
+    "lastClose": "float",
+    "low": "float",
+    "method": "str",
+    "mid": "float",
+    "sessionRemainingPct": "float",
+    "source": "str",
+    "sourceIsSynthetic": "bool",
+    "timeframe": "str"
+  },
+  "indicators": {
+    "latest": {
+      "adx": "float",
+      "atr": "float",
+      "ema20": "float",
+      "macdHist": "float",
+      "obv": "int",
+      "rsi": "float",
+      "sma200": "float",
+      "sma50": "float",
+      "stochD": "float",
+      "stochK": "float",
+      "vwap": "null"
+    },
+    "series": {
+      "bbLower": [
+        {
+          "time": "str",
+          "value": "float"
+        }
+      ],
+      "bbUpper": [
+        {
+          "time": "str",
+          "value": "float"
+        }
+      ],
+      "ema20": [
+        {
+          "time": "str",
+          "value": "float"
+        }
+      ],
+      "macd": [
+        {
+          "time": "str",
+          "value": "float"
+        }
+      ],
+      "macdHist": [
+        {
+          "time": "str",
+          "value": "float"
+        }
+      ],
+      "macdSignal": [
+        {
+          "time": "str",
+          "value": "float"
+        }
+      ],
+      "rsi": [
+        {
+          "time": "str",
+          "value": "float"
+        }
+      ],
+      "sma200": [
+        {
+          "time": "str",
+          "value": "float"
+        }
+      ],
+      "sma50": [
+        {
+          "time": "str",
+          "value": "float"
+        }
+      ]
+    }
+  },
+  "price": {
+    "asOf": "str",
+    "changePct": "float",
+    "lastClose": "float",
+    "ohlcv": [
+      {
+        "close": "float",
+        "high": "float",
+        "low": "float",
+        "open": "float",
+        "time": "str",
+        "volume": "int"
+      }
+    ]
+  },
+  "regime": {
+    "keyLevels": {
+      "resistance": [
+        "<empty list>"
+      ],
+      "support": [
+        "float"
+      ]
+    },
+    "lastClose": "float",
+    "macdState": "str",
+    "momentum": "str",
+    "movingAverages": {
+      "ema20": "float",
+      "sma200": "float",
+      "sma50": "float"
+    },
+    "priceVsBands": "str",
+    "shortTermTrend": "str",
+    "stochastic": "str",
+    "timeframe": "str",
+    "trend": "str",
+    "trendStrength": "str",
+    "volatility": "str",
+    "volume": "str",
+    "volumeTrend": "str",
+    "vwapState": "null"
+  },
+  "source": "str",
+  "sourceIsSynthetic": "bool",
+  "ticker": "str",
+  "timeframe": "str"
+}

@@ -1,0 +1,40 @@
+{
+  "name": "flip-long-to-short",
+  "description": "A long flipped straight to a short: one bar, two events, two units of turnover.",
+  "inputs": {
+    "costBps": 100.0,
+    "timeframe": "1D",
+    "retNext": [
+      0.1,
+      -0.2,
+      0.05
+    ],
+    "positions": [
+      1.0,
+      -1.0,
+      0.0
+    ]
+  },
+  "expected": {
+    "net": [
+      0.09,
+      0.18,
+      -0.01
+    ],
+    "equity": [
+      1.09,
+      1.2862,
+      1.273338
+    ],
+    "totalReturn": 0.273338,
+    "mean": 0.086666666667,
+    "std": 0.077602978179,
+    "numTrades": 2,
+    "turnover": [
+      1.0,
+      2.0,
+      1.0
+    ]
+  },
+  "tolerance": 1e-09
+}

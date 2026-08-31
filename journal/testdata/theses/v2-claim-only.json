@@ -1,0 +1,18 @@
+[
+  {
+    "id": "e5e5e5e5e5e5e5e5",
+    "schemaVersion": 2,
+    "ticker": "NVDA",
+    "claim": "Networking attach rate is the underrated part of the datacenter story.",
+    "text": "Networking attach rate is the underrated part of the datacenter story.",
+    "status": "draft",
+    "closeReason": null,
+    "closedAt": null,
+    "horizon": null,
+    "confidence": null,
+    "notes": "",
+    "lastReview": null,
+    "createdAt": 1753000000,
+    "updatedAt": 1753000000
+  }
+]

@@ -1,0 +1,25 @@
+[
+  {
+    "id": "a1b2c3d4e5f60718",
+    "ticker": "NVDA",
+    "text": "Gross margin holds above 70% through the next two quarters despite the CoWoS supply crunch.",
+    "status": "active",
+    "createdAt": 1748000000,
+    "updatedAt": 1749500000,
+    "lastCheck": {
+      "at": 1749500000,
+      "verdict": "challenged",
+      "summary": "Two of the three facts collected point the other way: packaging cost commentary and a widening lead-time gap.",
+      "evidence": [
+        { "fact": "CoWoS lead times extended again in the latest supply-chain note", "bearing": "contradicts" },
+        { "fact": "Management flagged higher packaging cost per unit on the last call", "bearing": "contradicts" },
+        { "fact": "Datacenter mix shift still favours higher-margin parts", "bearing": "supports" }
+      ],
+      "watchFor": [
+        "Next quarter's stated gross-margin guide",
+        "Any change in packaging-capacity commentary"
+      ],
+      "modelUsed": "qwen2.5:7b"
+    }
+  }
+]
