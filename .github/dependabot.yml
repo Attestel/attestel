@@ -1,0 +1,177 @@
+# Dependabot version updates.
+#
+# Until now this repository had only Dependabot *security* updates — the automatic ones that come
+# from an advisory being published against something in the dependency graph. Those are reactive
+# and, by definition, late. This file adds the scheduled kind, so a dependency moves because it
+# moved, not because someone found a hole in it.
+#
+# The nightly `advisories` job (govulncheck / pip-audit / npm audit) tells you when something is
+# vulnerable and can fix nothing. This is the other end of that.
+#
+# TWO THINGS THIS CONFIG IS DESIGNED AROUND
+#
+# 1. A wall of pull requests nobody reads is worse than no pull requests at all. There are 6 Go
+#    modules, 8 requirements files, one npm project and 11 Dockerfiles here; ungrouped and daily,
+#    that is a bot writing more PRs per week than the humans do. So: everything minor-and-patch is
+#    grouped into one PR per ecosystem, weekly, and the ecosystems are staggered across the week so
+#    no single morning is all bot. Majors are deliberately left ungrouped — a major deserves to be
+#    read on its own.
+#
+# 2. Grouping spans directories. pgx v5.9.2 arrived as three separate PRs — one each for `paper`,
+#    `journal` and `feedback` — all the same bump, all failing the same way. Listing the modules
+#    under one `directories:` key with a group means that arrives as one PR next time.
+#
+# Every PR still passes through the same required `ci` check as a human's, so the verification story
+# does not change.
+
+version: 2
+
+updates:
+  # ── GitHub Actions ────────────────────────────────────────────────────────────────────────────
+  # The pins in .github/workflows/ci.yml. Left alone, these drift until a runner deprecation forces
+  # the issue — which is exactly where this repository ended up with Node 20 (see issue #6).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # ── Go modules ────────────────────────────────────────────────────────────────────────────────
+  # `gateway` is listed and will never produce a pull request: CONTRIBUTING rule 5 keeps its go.mod
+  # at zero dependencies, and the `discipline guards` job fails the build if that changes. It is here
+  # as a tripwire — if this entry ever opens a PR, rule 5 has already been broken somewhere else.
+  - package-ecosystem: gomod
+    directories:
+      - /alerts
+      - /auth
+      - /feedback
+      - /gateway
+      - /journal
+      - /paper
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels: [dependencies, go]
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      go-modules:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # ── Python services ───────────────────────────────────────────────────────────────────────────
+  # Covers both requirements.txt and requirements-dev.txt in each directory. The dev files are
+  # deliberately absent from the runtime images, so a bump there cannot reach production — but it can
+  # break the suites, which is worth hearing about on a Wednesday rather than mid-review.
+  - package-ecosystem: pip
+    directories:
+      - /services/analysis
+      - /services/events
+      - /services/llm
+      - /services/prediction
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels: [dependencies, python]
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      python-services:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  # ── Web ───────────────────────────────────────────────────────────────────────────────────────
+  # Only /web. The package-lock.json at the repository root has an empty `packages` object and
+  # nothing installs from it.
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: thursday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels: [dependencies, web]
+    commit-message:
+      prefix: chore(deps)
+    groups:
+      web-runtime:
+        patterns: ["*"]
+        dependency-type: production
+        update-types: [minor, patch]
+      web-build:
+        patterns: ["*"]
+        dependency-type: development
+        update-types: [minor, patch]
+
+  # ── Docker base images ────────────────────────────────────────────────────────────────────────
+  # Read the `ignore` list first; it is most of the content of this entry.
+  #
+  # Four base images appear across the 11 Dockerfiles, and three of them are NOT independently
+  # updatable, because each is pinned twice — once in the Dockerfile and once as an env var in
+  # ci.yml that the test jobs use:
+  #
+  #     golang:1.25-alpine  ←→  GO_VERSION: '1.25'
+  #     python:3.11-slim    ←→  PYTHON_VERSION: '3.11'   (services/events has a hard >=3.10 floor)
+  #     node:20-alpine      ←→  NODE_VERSION: '20'
+  #
+  # Dependabot can move the first half of each pair and cannot move the second, and the resulting
+  # split is not hypothetical: it is precisely how a Go 1.25 `go` directive passed the test matrix
+  # on a downloaded toolchain while failing every image build. A language runtime here moves as one
+  # deliberate change across both files, by a person, or not at all.
+  #
+  # postgres is ignored for a different reason, and defensively: it appears in no Dockerfile, but
+  # docker-compose.yml sits in the root directory listed below, and both it and the CI `services:`
+  # blocks pin postgres:16-alpine on purpose — ci.yml's header explains that testing on a different
+  # major than production runs is a way to hear about a behaviour change from your users rather than
+  # from CI. If the root scan ever picks that file up, this entry is what keeps the pin intact.
+  #
+  # What is left is `alpine`, the runtime stage of every image. That one is worth having: it is
+  # where a patched libc or openssl reaches the shipped container, and nothing else pins it.
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /alerts
+      - /auth
+      - /feedback
+      - /gateway
+      - /journal
+      - /paper
+      - /services/analysis
+      - /services/events
+      - /services/llm
+      - /services/prediction
+    schedule:
+      interval: weekly
+      day: friday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: chore(deps)
+    ignore:
+      - dependency-name: golang    # moves with GO_VERSION in ci.yml
+      - dependency-name: python    # moves with PYTHON_VERSION in ci.yml
+      - dependency-name: node      # moves with NODE_VERSION in ci.yml
+      - dependency-name: postgres  # deliberately pinned to the deployed major
+    groups:
+      base-images:
+        patterns: ["*"]
+        update-types: [minor, patch]
