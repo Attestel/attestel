@@ -105,7 +105,7 @@ jobs:
       contents: write
       pull-requests: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # merge-base needs the whole history of both ends
 
