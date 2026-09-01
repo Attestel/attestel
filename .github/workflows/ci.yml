@@ -641,42 +641,9 @@ jobs:
         # build-time dependency is a different conversation from one in the shipped bundle.
         run: npm audit --omit=dev --audit-level=high
 
-  # CodeQL. Same reasoning as `advisories` for staying off the PR path — plus it is slow, and three
-  # languages of it on every push would dominate the queue.
-  codeql:
-    name: codeql / ${{ matrix.language }}
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-      security-events: write
-      actions: read
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [go, python, javascript-typescript]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        if: matrix.language == 'go'
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: false
-
-      - uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-          queries: security-extended
-
-      - name: build the Go modules for analysis
-        if: matrix.language == 'go'
-        # Six independent modules with no go.work, so autobuild finds one of them at best.
-        run: |
-          set -euo pipefail
-          for m in alerts auth feedback gateway journal paper; do ( cd "$m" && go build ./... ); done
-
-      - uses: github/codeql-action/analyze@v3
-        with:
-          category: /language:${{ matrix.language }}
+  # CodeQL is NOT a job here. This repository runs GitHub's *default* code-scanning setup, and
+  # GitHub refuses SARIF from an advanced workflow while default setup is enabled ("CodeQL analyses
+  # from advanced configurations cannot be processed when the default setup is enabled"). Default
+  # setup covers actions/go/javascript/python/typescript and reports on its own schedule. If the
+  # `security-extended` query suite is wanted back, disable default setup under
+  # Settings → Code security first, then reinstate the job — not the other way round.

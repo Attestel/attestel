@@ -1,0 +1,66 @@
+name: Feature request
+description: Propose a change to what Attestel does.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before writing: the [discipline rules](https://github.com/Attestel/attestel/blob/master/CONTRIBUTING.md#discipline-rules)
+        are design invariants, not preferences. A proposal that needs one of them relaxed is worth
+        opening anyway — just say which one and why the trade is worth it, rather than working
+        around it quietly.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What research task is harder than it should be today? Describe the situation, not the solution.
+      placeholder: |
+        When a thesis assumption is invalidated, I find out by noticing it myself on Today.
+        There is no record of *when* it stopped being true.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like instead
+      description: The behaviour you want. Sketch the API, the screen or the data shape if you have one in mind.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Which stage of the research loop
+      multiple: true
+      options:
+        - Orient (Today, Explore, Calendar)
+        - Understand (Research, Library)
+        - Form (thesis, evidence)
+        - Challenge (lenses, committee)
+        - Monitor (Following, Watchlist, alerts)
+        - Decide / Review (Journal, outcomes)
+        - Operations (deploy, config, self-hosting)
+    validations:
+      required: true
+
+  - type: textarea
+    id: discipline
+    attributes:
+      label: How it sits with the discipline rules
+      description: |
+        Does it produce a buy/sell verdict? Does it let the model emit a number the server did not
+        compute? Does it put a model call behind a timer? Does anything execute a trade? If the
+        answer to all four is no, say so in a line.
+      placeholder: No buy/sell language; no model call on a timer; nothing executes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including "do nothing" — say what makes that unsatisfying.
+    validations:
+      required: false

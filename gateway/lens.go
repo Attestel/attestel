@@ -32,7 +32,7 @@ import (
 // load (invariant #4); the route is a POST and every caller is a click on a named task button.
 
 const (
-	lensTimeout      = 90 * time.Second
+	lensTimeout       = 90 * time.Second
 	maxEvidencePerRun = 24
 	maxUserInstruct   = 1000
 )
@@ -206,7 +206,7 @@ func (s *Server) handleLens(w http.ResponseWriter, r *http.Request) {
 		if chart == nil {
 			writeJSON(w, http.StatusBadGateway, map[string]any{
 				"error": "chart context unavailable: the analysis service is not responding",
-				"code": "analysis_unreachable"})
+				"code":  "analysis_unreachable"})
 			return
 		}
 	}

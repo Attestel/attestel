@@ -30,12 +30,12 @@ type lensStubs struct {
 	llm      *httptest.Server
 	journal  *httptest.Server
 
-	llmCalls    int              // how many times the llm was hit — 0 proves "no model call"
-	llmLastBody map[string]any   // what the gateway actually sent the llm
-	savedReview map[string]any   // what the gateway posted to /reviews
+	llmCalls      int            // how many times the llm was hit — 0 proves "no model call"
+	llmLastBody   map[string]any // what the gateway actually sent the llm
+	savedReview   map[string]any // what the gateway posted to /reviews
 	ownedEvidence []map[string]any
-	ownedThesis map[string]any
-	llmReply    map[string]any
+	ownedThesis   map[string]any
+	llmReply      map[string]any
 }
 
 func newLensStubs(t *testing.T) *lensStubs {
@@ -43,9 +43,9 @@ func newLensStubs(t *testing.T) *lensStubs {
 	s := &lensStubs{
 		ownedThesis: map[string]any{
 			"id": "9f2c1b7a4e0d5a83", "ticker": "NVDA",
-			"claim": "Networking attach lifts blended ASPs.",
+			"claim":       "Networking attach lifts blended ASPs.",
 			"assumptions": []any{map[string]any{"id": "asm_1111111111111111", "text": "Attach above 60%"}},
-			"catalysts": []any{}, "risks": []any{},
+			"catalysts":   []any{}, "risks": []any{},
 			"invalidationConditions": []any{}, "nextQuestions": []any{},
 		},
 		ownedEvidence: []map[string]any{

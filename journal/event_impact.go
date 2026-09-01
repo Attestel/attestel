@@ -62,13 +62,13 @@ const (
 // Bearing values. Two are reachable deterministically; two are reserved for an evidence-citing
 // model hypothesis and are never produced by the code in this file.
 const (
-	bearingContext      = "context"
-	bearingUnclear      = "unclear"
-	bearingSupports     = "supports"     // reserved: model hypothesis only
-	bearingContradicts  = "contradicts"  // reserved: model hypothesis only
-	matchSourceTerms    = "term-overlap"
-	matchSourceKind     = "event-kind"
-	matchSourceDirect   = "direct-subject"
+	bearingContext     = "context"
+	bearingUnclear     = "unclear"
+	bearingSupports    = "supports"    // reserved: model hypothesis only
+	bearingContradicts = "contradicts" // reserved: model hypothesis only
+	matchSourceTerms   = "term-overlap"
+	matchSourceKind    = "event-kind"
+	matchSourceDirect  = "direct-subject"
 )
 
 // storedRelationship is the events service's `GET /relationships` row.
@@ -411,7 +411,6 @@ func (s *Server) handleThesisEventReviews(w http.ResponseWriter, r *http.Request
 	})
 }
 
-
 // strongestPerTickerEvent collapses the relationship rows for one (ticker, event) pair down to the
 // strongest one, so a downstream consumer sees each pair once. It preserves input order among the
 // survivors, which keeps the review queue's ordering deterministic.
@@ -548,10 +547,10 @@ type PortfolioEventImpact struct {
 	AffectedHoldings []AffectedHolding `json:"affectedHoldings"`
 	// ExposedWeight counts each HOLDING once, however many relationship types connect it to the
 	// event. A position that is both `sector` and `competitor` is still one position.
-	ExposedWeight   *float64            `json:"exposedWeight,omitempty"`
-	WeightsComplete bool                `json:"weightsComplete"`
-	Relationships   []string            `json:"relationshipTypes"`
-	SectorExposure  []PortfolioExposure `json:"sectorExposure"`
+	ExposedWeight   *float64               `json:"exposedWeight,omitempty"`
+	WeightsComplete bool                   `json:"weightsComplete"`
+	Relationships   []string               `json:"relationshipTypes"`
+	SectorExposure  []PortfolioExposure    `json:"sectorExposure"`
 	Concentration   PortfolioConcentration `json:"concentrationContext"`
 
 	AsOf     string   `json:"asOf"`
