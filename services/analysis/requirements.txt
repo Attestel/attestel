@@ -1,6 +1,6 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-pandas==2.2.3
+pandas==3.0.5
 numpy==2.2.1
 requests==2.32.3
 # yfinance (Yahoo): the no-key, real-data DEFAULT price source. Needs network but no account/key.
