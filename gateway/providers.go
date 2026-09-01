@@ -23,13 +23,13 @@ import (
 // ---------- Alpha Vantage EARNINGS (EPS beat/miss history) ----------
 
 type EarningsPoint struct {
-	FiscalDateEnding  string   `json:"fiscalDateEnding"`
-	ReportedDate      string   `json:"reportedDate"`
-	ReportedEPS       *float64 `json:"reportedEPS"`
-	EstimatedEPS      *float64 `json:"estimatedEPS"`
-	Surprise          *float64 `json:"surprise"`
-	SurprisePercent   *float64 `json:"surprisePercentage"`
-	Beat              *bool    `json:"beat"`
+	FiscalDateEnding string   `json:"fiscalDateEnding"`
+	ReportedDate     string   `json:"reportedDate"`
+	ReportedEPS      *float64 `json:"reportedEPS"`
+	EstimatedEPS     *float64 `json:"estimatedEPS"`
+	Surprise         *float64 `json:"surprise"`
+	SurprisePercent  *float64 `json:"surprisePercentage"`
+	Beat             *bool    `json:"beat"`
 }
 
 // avRaw mirrors the subset of Alpha Vantage's EARNINGS payload we consume. Strings because AV

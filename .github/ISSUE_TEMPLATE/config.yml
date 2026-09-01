@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/Attestel/attestel/security/advisories/new
+    about: Report privately through GitHub. Never open a public issue for a security problem.
+  - name: Contributing guide and discipline rules
+    url: https://github.com/Attestel/attestel/blob/master/CONTRIBUTING.md
+    about: How to run it locally, what the load-bearing rules are, and what a PR is held to.
+  - name: Validation walkthrough
+    url: https://github.com/Attestel/attestel/blob/master/docs/VALIDATION_AND_GO_LIVE.md
+    about: Before believing any signal — walk this end to end first.

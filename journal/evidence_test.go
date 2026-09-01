@@ -383,7 +383,7 @@ func TestEvidenceRejectsUnknownProviderAndForeignSourceStore(t *testing.T) {
 	q := map[string]any{
 		"ticker": "NVDA", "kind": "transcript_excerpt", "provider": "user", "dataState": "live",
 		"attribution": "Q1 call", "excerpt": "we are supply constrained",
-		"sourceRef":   map[string]any{"store": "gateway-fetch", "id": "https://ir.example.com/q1", "locator": ""},
+		"sourceRef": map[string]any{"store": "gateway-fetch", "id": "https://ir.example.com/q1", "locator": ""},
 	}
 	code, body = e.do(t, "u1", "POST", "/evidence", q)
 	if code != http.StatusBadRequest {

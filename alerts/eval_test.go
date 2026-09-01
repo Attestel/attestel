@@ -194,7 +194,7 @@ func TestNotificationNamesTheCompany(t *testing.T) {
 	body := notificationBody(Event{
 		Ticker: "NVDA", Message: "condition met", ThesisID: testThesisID,
 		ResearchAction: ActionReviewEvidence, DataState: DataStateLive,
-		ResearchLink:   researchLinkFor("NVDA", testThesisID),
+		ResearchLink: researchLinkFor("NVDA", testThesisID),
 	})
 	if !strings.Contains(body, "NVDA") {
 		t.Errorf("the notification body must name the company in text, got %q", body)
