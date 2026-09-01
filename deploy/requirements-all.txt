@@ -8,4 +8,4 @@ numpy==2.2.1
 pandas==2.2.3
 yfinance==1.5.1
 scikit-learn==1.5.2
-lightgbm==4.5.0
+lightgbm==4.6.0
