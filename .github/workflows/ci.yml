@@ -38,7 +38,7 @@ permissions:
   contents: read
 
 env:
-  GO_VERSION: '1.24'
+  GO_VERSION: '1.25'
   PYTHON_VERSION: '3.11'   # services/events has a hard >=3.10 floor; the images are all 3.11
   NODE_VERSION: '20'
   # NOTE: the PostgreSQL image is pinned inline in each `services:` block rather than here — the
@@ -339,6 +339,14 @@ jobs:
       FEEDBACK_TEST_DATABASE_URL: postgresql://attestel:attestel@localhost:5432/attestel_events
       JOURNAL_TEST_DATABASE_URL:  postgresql://attestel:attestel@localhost:5432/attestel_events
       PAPER_TEST_DATABASE_URL:    postgresql://attestel:attestel@localhost:5432/attestel_events
+      # Match the images. The official `golang` Docker images set GOTOOLCHAIN=local, so a go.mod
+      # whose `go` directive exceeds GO_VERSION fails the image build. Left at the default `auto`,
+      # this job would silently download that newer toolchain and pass — reporting green for a
+      # module the deploy artifact cannot compile. That is not a hypothetical: it is exactly how
+      # pgx v5.9.2 (which raises the directive to 1.25.0) passed `go / paper` while breaking
+      # `image / paper`. Pinning it here means the test job and the image fail together, and the
+      # fix is to raise GO_VERSION and the base images deliberately, as one change.
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
 
