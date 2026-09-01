@@ -80,10 +80,15 @@ export default defineConfig({
     // Split the heavy vendor libs so the main bundle stays small and caches well.
     rollupOptions: {
       output: {
-        manualChunks: {
-          react: ["react", "react-dom"],
-          charts: ["lightweight-charts"],
-          motion: ["framer-motion"],
+        // Function form, not the object form. Vite 8 replaces rollup with rolldown, which dropped
+        // object `manualChunks` entirely — it fails the build with "Expected Function but received
+        // Object" — and the function form is what both bundlers accept. Written this way, the Vite
+        // major becomes an ordinary dependency bump instead of a bump plus a config migration.
+        // Verified to produce the same three chunks under vite 6.4.3 and vite 8.2.2.
+        manualChunks(id) {
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
+          if (id.includes("lightweight-charts")) return "charts";
+          if (id.includes("framer-motion")) return "motion";
         },
       },
     },

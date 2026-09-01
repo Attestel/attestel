@@ -76,6 +76,16 @@ updates:
   # Covers both requirements.txt and requirements-dev.txt in each directory. The dev files are
   # deliberately absent from the runtime images, so a bump there cannot reach production — but it can
   # break the suites, which is worth hearing about on a Wednesday rather than mid-review.
+  #
+  # THE PYTHON FLOOR. A bare requirements.txt carries no `requires-python`, so Dependabot has nothing
+  # telling it which interpreter this repository targets and will happily pin a release that cannot
+  # install here — it proposed numpy==2.5.2, which requires >=3.12, against images and CI pinned to
+  # 3.11. The `.python-version` files added alongside this are what supply that floor. They are
+  # inert to everything else: the Dockerfiles name python:3.11-slim directly and ci.yml passes
+  # PYTHON_VERSION to setup-python, so neither reads them.
+  #
+  # They are a way to stop proposing the impossible, not a safety net. CI already refuses an
+  # uninstallable pin, and that check stays the thing that actually decides.
   - package-ecosystem: pip
     directories:
       - /services/analysis
@@ -99,6 +109,20 @@ updates:
   # ── Web ───────────────────────────────────────────────────────────────────────────────────────
   # Only /web. The package-lock.json at the repository root has an empty `packages` object and
   # nothing installs from it.
+  #
+  # THE FIRST TWO GROUPS ARE THE IMPORTANT ONES, and they are deliberately not restricted to
+  # minor-and-patch the way the other groups here are. Some packages are a matched set that npm will
+  # refuse to resolve if they move apart, and a group is the only way to say so:
+  #
+  #   react + react-dom          react-dom@18 peers react@^18. Bumping react alone is an ERESOLVE,
+  #                              every time, with no version of react-dom that tolerates it.
+  #   vite + @vitejs/plugin-react   plugin-react@4 peers vite ≤7; plugin-react@6 peers vite ^8.
+  #                              Either one alone is unresolvable against the other's current major.
+  #
+  # Both pairs were split across separate PRs before this was here, and all three were unmergeable
+  # by construction — not because the upgrade was wrong, but because half of it was missing.
+  # Group order matters: a dependency joins the FIRST group it matches, so these must precede the
+  # catch-all `*` groups below.
   - package-ecosystem: npm
     directory: /web
     schedule:
@@ -111,6 +135,10 @@ updates:
     commit-message:
       prefix: chore(deps)
     groups:
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      vite:
+        patterns: ["vite", "@vitejs/*"]
       web-runtime:
         patterns: ["*"]
         dependency-type: production
