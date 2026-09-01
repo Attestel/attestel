@@ -59,6 +59,28 @@ def test_openapi_paths_unchanged():
     assert set(app.openapi()["paths"].keys()) == EXISTING_PATHS
 
 
+def _registered_paths(routes) -> list[str]:
+    """Every path the app actually serves, flattened — a LIST, not a set, because the double
+    registration this file exists to catch shows up only as a repeat.
+
+    FastAPI 0.141 stopped splicing an included router's routes into the parent's `.routes`; it
+    appends one opaque `_IncludedRouter` that keeps them on `.original_router` instead. `/analyst`
+    is the seam's entire payload and arrives that way, so reading `app.routes` flat stopped seeing
+    it at all and this test read "registered zero times" — a green route (the 405 test below still
+    passes) reported as missing. Descending keeps the count a count of real registrations on both
+    the pre- and post-0.141 shapes.
+    """
+    paths: list[str] = []
+    for route in routes:
+        path = getattr(route, "path", None)
+        if path is not None:
+            paths.append(path)
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            paths.extend(_registered_paths(included.routes))
+    return paths
+
+
 def test_the_analyst_route_arrived_through_the_seam_and_not_through_main():
     """§9.28: `main.py` includes `analyst_router` once and knows nothing else about this lane. If a
     second registration ever appears, the route is served twice and this catches it."""
@@ -67,7 +89,7 @@ def test_the_analyst_route_arrived_through_the_seam_and_not_through_main():
     assert "from .analyst import" not in main_src, (
         "main.py must not import analyst.py directly — the seam is the only coupling")
 
-    assert len([r for r in app.routes if getattr(r, "path", None) == "/analyst"]) == 1
+    assert _registered_paths(app.routes).count("/analyst") == 1
 
 
 def test_the_analyst_route_rejects_a_get():

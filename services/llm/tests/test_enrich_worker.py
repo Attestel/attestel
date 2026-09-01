@@ -625,11 +625,29 @@ def test_the_worker_is_runnable_as_a_module():
 
 
 def test_runtime_dependencies_remain_explicitly_pinned():
+    """Two claims, and deliberately not a third.
+
+    The name of this test is the first claim: every runtime dependency is pinned with `==`, never a
+    range, so an image built today and the same image rebuilt in a year install the same code. The
+    second is the set of package NAMES — this service is the one on the model path, and a dependency
+    arriving here unnoticed is worth a failing test.
+
+    What is NOT asserted is the version numbers. They were, and it made this a change-detector that
+    failed on every legitimate bump: Dependabot's `python-services` group was blocked by this
+    assertion alone (#41), which teaches whoever hits it to edit the expectation without reading it
+    — the exact reflex a test like this exists to prevent. Which versions are correct is decided by
+    the resolver and by CI installing them, not by a literal copied into a test file.
+    """
     req = (APP_DIR.parent / "requirements.txt").read_text(encoding="utf-8")
-    assert sorted(l.strip() for l in req.splitlines() if l.strip()) == [
-        "fastapi==0.115.6", "psycopg[binary]==3.2.9", "pydantic==2.10.4",
-        "requests==2.32.3", "uvicorn[standard]==0.34.0",
-    ]
+    lines = [l.strip() for l in req.splitlines() if l.strip() and not l.startswith("#")]
+
+    unpinned = [l for l in lines if "==" not in l]
+    assert not unpinned, f"these are not pinned with ==: {unpinned}"
+
+    names = sorted(l.split("==")[0] for l in lines)
+    assert names == [
+        "fastapi", "psycopg[binary]", "pydantic", "requests", "uvicorn[standard]",
+    ], "the runtime dependency set changed — add it here deliberately, or take it back out"
 
 
 # --- the payload the worker actually posts -------------------------------------------------------
