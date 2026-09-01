@@ -80,11 +80,21 @@ cd services/analysis   && ./.venv/bin/python -m pytest -q
 cd services/prediction && ./.venv/bin/python -m pytest -q
 cd services/llm        && ./.venv/bin/python -m pytest -q
 cd services/events     && ./.venv/bin/python -m pytest -q
-cd gateway             && go test ./...
+
+# Go: CI runs all six modules as a matrix, not just gateway.
+for m in alerts auth feedback gateway journal paper; do (cd "$m" && go test ./...); done
+
+cd web && npm ci && npm test
 ```
 
 Test-only dependencies live in each service's `requirements-dev.txt` and are deliberately not in the
-runtime images. The web app has no test or lint step; `npm run build` is the check.
+runtime images. The web app does have a test step -- `npm test` runs `node --test` over
+`web/tests/`, and CI runs it before `npm run build`, so a failure there fails the build job.
+
+The Postgres-backed Go tests (`alerts`, `auth`, `feedback`, `journal`, `paper`) call `t.Skip` unless
+the matching `<SERVICE>_TEST_DATABASE_URL` is set, so the loop above passes on a fresh clone with no
+database. CI sets all five against a Postgres service, which is where those tests actually execute --
+locally green is therefore weaker than CI green for those modules.
 
 ## Discipline rules
 
@@ -123,8 +133,8 @@ code is.
 - Keep changes scoped; match the surrounding code's style, naming and comment density.
 - Add or update tests for behaviour you change. Tests must pass without network or a model.
 - If your change touches a documented contract (`docs/PAPER_EXECUTION_CONTRACT.md`,
-  `docs/research-os/*`), update the contract in the same PR — a divergence between the document and
-  the code is a defect in whichever moved.
+  `docs/PAPER_DASHBOARD_CONTRACT.md`, `docs/PREDICTION_AUTOMATION_CONTRACT.md`), update the contract
+  in the same PR — a divergence between the document and the code is a defect in whichever moved.
 - Explain *why*, not just *what*. This codebase's comments carry reasoning on purpose.
 
 ## Reporting bugs
