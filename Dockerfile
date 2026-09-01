@@ -6,7 +6,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ---- Stage 1: build the 6 Go services (static binaries) ----
-FROM golang:1.24-alpine AS gobuild
+FROM golang:1.25-alpine AS gobuild
 WORKDIR /src
 COPY gateway/ ./gateway/
 COPY alerts/  ./alerts/
