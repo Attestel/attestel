@@ -1,10 +1,10 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
 pandas==3.0.5
-numpy==2.2.1
-requests==2.32.3
+numpy==2.4.6
+requests==2.34.2
 # yfinance (Yahoo): the no-key, real-data DEFAULT price source. Needs network but no account/key.
 # Unofficial scraper — fragile but fine for a personal single-user tool. (Twelve Data uses requests.)
 # Pin a current release: older 0.2.x can't do Yahoo's crumb/cookie handshake and gets 429-rate-limited.
-yfinance==1.5.1
-psycopg[binary]==3.2.9
+yfinance==1.7.0
+psycopg[binary]==3.3.4
