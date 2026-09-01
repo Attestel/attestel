@@ -8,7 +8,7 @@ COPY *.go ./
 COPY seed ./seed
 RUN CGO_ENABLED=0 go build -o /gateway .
 
-FROM alpine:3.20
+FROM alpine:3.24
 # ca-certificates: the gateway makes outbound HTTPS calls (SEC EDGAR, Alpha Vantage, Marketaux).
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
