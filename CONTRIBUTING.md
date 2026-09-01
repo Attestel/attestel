@@ -87,6 +87,10 @@ for m in alerts auth feedback gateway journal paper; do (cd "$m" && go test ./..
 cd web && npm ci && npm test
 ```
 
+Run `make fmt-check` before opening a PR. It is the same `gofmt -l` sweep CI's `syntax` job runs over
+the six Go modules, and catching drift locally costs a second instead of a CI round-trip; `make fmt`
+rewrites the files in place.
+
 Test-only dependencies live in each service's `requirements-dev.txt` and are deliberately not in the
 runtime images. The web app does have a test step -- `npm test` runs `node --test` over
 `web/tests/`, and CI runs it before `npm run build`, so a failure there fails the build job.
