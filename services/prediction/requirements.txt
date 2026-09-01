@@ -5,7 +5,7 @@ numpy==2.2.1
 scikit-learn==1.5.2
 # LightGBM is CPU-only and tiny; the wheel needs OpenMP at runtime (libgomp1 in the Dockerfile).
 lightgbm==4.6.0
-requests==2.32.3
+requests==2.33.0
 # Durable production model/verdict/report storage. File storage remains the no-DATABASE_URL test
 # fallback; compose and container deploys configure PostgreSQL.
 psycopg[binary]==3.2.9
