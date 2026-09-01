@@ -1,0 +1,208 @@
+# Branch cleanup.
+#
+# READ THIS BEFORE ADDING TO IT. GitHub has a native setting — Settings → General → "Automatically
+# delete head branches" (`delete_branch_on_merge`) — that does the on-merge half of this file with no
+# workflow, no Actions minutes and no token. If that setting is on, the `on-merge` job below simply
+# finds the branch already gone and reports it; the two are safe together, and turning the setting on
+# is the better way to get that behaviour.
+#
+# What the setting CANNOT do, and why this file exists, is the second job: sweeping branches that
+# were already merged before the setting was turned on, or merged by a push rather than a pull
+# request. This repository accumulated three of those (`chore/ci-green-and-community`,
+# `chore/go-1.25-toolchain`, `chore/dependabot-config`) in a single week.
+#
+# THE SAFETY MODEL. Deleting a branch is the one irreversible thing a workflow here can do, so every
+# deletion has to clear all of these:
+#
+#   · it is not the default branch;
+#   · it is not the head of any open pull request;
+#   · it is reachable from the default branch — `git merge-base --is-ancestor` proves every commit
+#     on it is already on master, so nothing unique is lost;
+#   · it is not protected by a ruleset;
+#   · for the sweep, it has been idle for at least MIN_AGE_DAYS.
+#
+# The sweep defaults to a dry run. It reports what it would delete and deletes nothing until someone
+# dispatches it with `apply: true`. A cleanup job that deletes on its first run is a cleanup job
+# whose blast radius nobody has measured.
+name: Delete merged branches
+
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    # Sunday, after the week's Dependabot PRs have been dealt with.
+    - cron: '23 5 * * 0'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Actually delete. Leave false for a dry run that only reports.'
+        type: boolean
+        default: false
+      min_age_days:
+        description: 'Only sweep branches whose last commit is at least this old.'
+        type: string
+        default: '7'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: delete-merged-branches
+  cancel-in-progress: false
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # The merged head of a pull request, deleted as it merges.
+  #
+  # Redundant with `delete_branch_on_merge` and deliberately tolerant of it: if the setting already
+  # removed the ref, the delete returns 422 and this reports "already gone" rather than failing.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  on-merge:
+    name: delete the merged head
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write   # deleting a ref is a write to the repository
+    steps:
+      - name: delete the head branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # A fork's head lives in someone else's repository and is not ours to delete; the `if`
+          # above already excluded that case, and this is the second lock on the same door.
+          echo "merged head: $BRANCH"
+
+          if gh api -X DELETE "repos/$REPO/git/refs/heads/$BRANCH" --silent 2>/dev/null; then
+            echo "deleted $BRANCH"
+          elif ! gh api "repos/$REPO/git/refs/heads/$BRANCH" --silent 2>/dev/null; then
+            # Already gone — the ordinary outcome when `delete_branch_on_merge` beat us to it, and
+            # the state we wanted either way.
+            echo "$BRANCH was already removed"
+          else
+            # It still exists and would not delete: a ruleset is protecting it. Worth seeing in the
+            # log, but not worth failing a merge that has already succeeded.
+            echo "::warning::$BRANCH still exists and could not be deleted — protected by a ruleset?"
+          fi
+
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  # The sweep. Everything the on-merge path never saw.
+  # ───────────────────────────────────────────────────────────────────────────────────────────────
+  sweep:
+    name: sweep stale merged branches
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # merge-base needs the whole history of both ends
+
+      - name: find and delete
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          # Deliberately NOT github.event.repository.default_branch: the `schedule` event payload is
+          # not guaranteed to carry the repository object, and an empty default branch here would
+          # make every branch look unmerged — or, worse, make the default branch itself a candidate.
+          # Asking the API costs one call and cannot be empty.
+          # A scheduled run is never allowed to delete. Only a human dispatching with apply=true is.
+          APPLY: ${{ github.event_name == 'workflow_dispatch' && inputs.apply == true }}
+          MIN_AGE_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.min_age_days || '7' }}
+        run: |
+          set -euo pipefail
+
+          DEFAULT_BRANCH="$(gh api "repos/$REPO" -q .default_branch)"
+          if [ -z "$DEFAULT_BRANCH" ]; then
+            echo "::error::could not determine the default branch — refusing to sweep"; exit 1
+          fi
+
+          echo "mode: $([ "$APPLY" = "true" ] && echo 'APPLY — branches will be deleted' || echo 'DRY RUN — reporting only')"
+          echo "default branch: $DEFAULT_BRANCH"
+          echo "minimum age: ${MIN_AGE_DAYS}d"
+          echo
+
+          # Heads of open PRs. Such a branch can be an ancestor of master — a PR whose work landed
+          # via another PR still shows its own diff, and deleting the head closes it as unmerged.
+          open_heads="$(gh pr list --repo "$REPO" --state open --limit 200 \
+                          --json headRefName,headRepositoryOwner \
+                        | jq -r --arg o "${REPO%%/*}" \
+                            '.[] | select(.headRepositoryOwner.login == $o) | .headRefName')"
+          echo "heads of open PRs (never touched):"; printf '%s\n' "${open_heads:-  (none)}" | sed 's/^/  /'
+          echo
+
+          cutoff=$(( $(date -u +%s) - MIN_AGE_DAYS * 86400 ))
+          deleted=0; kept=0; failed=0
+
+          # `for-each-ref` rather than `branch --merged`: it hands us the committer date in the same
+          # pass, and it never depends on which branch happens to be checked out.
+          now=$(date -u +%s)
+
+          while read -r date ref; do
+            [ -n "${ref:-}" ] || continue
+
+            # refs/remotes/origin/HEAD is a symbolic ref to the default branch, not a branch of its
+            # own. Left in, it shortens to a bare "origin" and reaches merge-base as the nonexistent
+            # "origin/origin".
+            [ "$ref" = "refs/remotes/origin/HEAD" ] && continue
+            branch="${ref#refs/remotes/origin/}"
+
+            [ "$branch" = "$DEFAULT_BRANCH" ] && continue
+
+            if printf '%s\n' "$open_heads" | grep -qxF "$branch"; then
+              echo "  keep    $branch  — head of an open PR"; kept=$((kept+1)); continue
+            fi
+
+            # The load-bearing check: every commit on this branch is already on the default branch.
+            if ! git merge-base --is-ancestor "origin/$branch" "origin/$DEFAULT_BRANCH"; then
+              echo "  keep    $branch  — has commits not on $DEFAULT_BRANCH"; kept=$((kept+1)); continue
+            fi
+
+            if [ "$date" -gt "$cutoff" ]; then
+              echo "  keep    $branch  — merged, but newer than ${MIN_AGE_DAYS}d"; kept=$((kept+1)); continue
+            fi
+
+            if [ "$APPLY" != "true" ]; then
+              echo "  WOULD DELETE  $branch  (merged, idle $(( (now - date) / 86400 ))d)"
+              deleted=$((deleted+1)); continue
+            fi
+
+            if gh api -X DELETE "repos/$REPO/git/refs/heads/$branch" --silent 2>/dev/null; then
+              echo "  deleted $branch"; deleted=$((deleted+1))
+            else
+              # A ruleset `deletion` rule lands here, which is the correct outcome: the ruleset is
+              # the authority on what may be deleted, and this job does not argue with it.
+              echo "::warning::could not delete $branch — protected by a ruleset, or already gone"
+              failed=$((failed+1))
+            fi
+          done < <(git for-each-ref --format='%(committerdate:unix) %(refname)' refs/remotes/origin)
+
+          echo
+          if [ "$APPLY" = "true" ]; then
+            echo "deleted $deleted, kept $kept, could not delete $failed"
+          else
+            echo "would delete $deleted, would keep $kept"
+            echo "Re-run this workflow from the Actions tab with apply=true to carry it out."
+          fi
+
+          {
+            echo "### Branch sweep"
+            echo
+            echo "- mode: **$([ "$APPLY" = "true" ] && echo 'apply' || echo 'dry run')**"
+            echo "- $([ "$APPLY" = "true" ] && echo 'deleted' || echo 'would delete'): **$deleted**"
+            echo "- kept: **$kept**"
+            # An `[ ] && echo` here would be the script's last statement, and a false test makes
+            # that statement — and so the whole step — exit non-zero under `set -e`.
+            if [ "$failed" -gt 0 ]; then echo "- could not delete: **$failed**"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
