@@ -143,6 +143,12 @@ Open an issue with what you ran, what you expected and what happened, plus the p
 UI showed (`live` / `seed` / `synthetic`) and which runtime served the model read. For anything
 security-related, use [SECURITY.md](SECURITY.md) instead of a public issue.
 
+## Code of conduct
+
+Participation here is governed by the [Code of Conduct](CODE_OF_CONDUCT.md). It is the Contributor
+Covenant, unmodified; the short version is that disagreement about the code is welcome and
+disagreement about a person is not.
+
 ## License
 
 By contributing you agree that your contributions are licensed under the

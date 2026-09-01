@@ -1,0 +1,66 @@
+name: Data coverage
+description: Add or correct a company IR feed, or an event relationship. No code required.
+labels: ["data-coverage", "good first issue"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Coverage is the highest-value, lowest-friction contribution here: both registries are plain
+        JSON loaded at runtime, so an entry needs **no code change and no rebuild**. See
+        [CONTRIBUTING.md](https://github.com/Attestel/attestel/blob/master/CONTRIBUTING.md#start-here-the-two-registries).
+
+        You are welcome to open this issue *and* the PR that resolves it.
+
+  - type: dropdown
+    id: registry
+    attributes:
+      label: Which registry
+      options:
+        - Company IR feed (COMPANY_IR_REGISTRY_PATH)
+        - Event relationship (RELATIONSHIP_REGISTRY_PATH)
+    validations:
+      required: true
+
+  - type: input
+    id: ticker
+    attributes:
+      label: Ticker
+      placeholder: ACME
+    validations:
+      required: true
+
+  - type: textarea
+    id: entry
+    attributes:
+      label: The entry
+      description: The JSON exactly as it would appear in the registry file.
+      render: json
+      placeholder: |
+        { "ticker": "ACME",
+          "company": "Acme Industries",
+          "feedUrl": "https://investors.example.com/events.ics",
+          "feedKind": "ics",
+          "timezone": "America/New_York",
+          "eventKinds": ["earnings"] }
+    validations:
+      required: true
+
+  - type: textarea
+    id: provenance
+    attributes:
+      label: Where this came from
+      description: |
+        The IR page the feed URL is published on, or the document a relationship is asserted by.
+        A relationship entry with no `reason` or no `sourceRef` is dropped whole, by design — the
+        citation is not paperwork, it is the data.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: The feed URL is the company's own IR feed, not an aggregator's.
+        - label: I fetched it and it parses as the `feedKind` I named.
+        - label: For a relationship — `relationship` is one of `direct`, `sector`, `supplier`, `customer`, `competitor`, `macro`, `factor`.

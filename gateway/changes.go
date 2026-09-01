@@ -290,14 +290,14 @@ func (s *Server) loadThesisWithStatus(ctx context.Context, id, cookie string) (m
 // Read the constraints as a list of things this endpoint CANNOT do, because that is what makes it
 // safe to have at all:
 //
-//   · It cannot see anything but the normalized change set. The model is handed `chg_` ids and the
-//     code-generated summaries — no thesis text, no evidence excerpts, no raw prices.
-//   · It cannot introduce a change. Every `chg_` id in the reply is checked against the set that was
-//     just computed; an unknown id fails validation, and a second failure falls back to the stub.
-//   · It cannot write. There is no journal write anywhere in this handler, so no model output can
-//     reach a thesis field.
-//   · It cannot be reached by a poll or the scheduler. It is a POST, and alerts/eval.go has no
-//     client for it (§4.6).
+//	· It cannot see anything but the normalized change set. The model is handed `chg_` ids and the
+//	  code-generated summaries — no thesis text, no evidence excerpts, no raw prices.
+//	· It cannot introduce a change. Every `chg_` id in the reply is checked against the set that was
+//	  just computed; an unknown id fails validation, and a second failure falls back to the stub.
+//	· It cannot write. There is no journal write anywhere in this handler, so no model output can
+//	  reach a thesis field.
+//	· It cannot be reached by a poll or the scheduler. It is a POST, and alerts/eval.go has no
+//	  client for it (§4.6).
 //
 // The change set stays the authority; this is a reading aid over it.
 func (s *Server) handleThesisChangesSummary(w http.ResponseWriter, r *http.Request) {

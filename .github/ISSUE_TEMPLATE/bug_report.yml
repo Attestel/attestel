@@ -1,0 +1,96 @@
+name: Bug report
+description: Something behaves differently from what the docs or the code say it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Anything security-related goes through [SECURITY.md](https://github.com/Attestel/attestel/blob/master/SECURITY.md)
+        instead — private vulnerability reporting, not a public issue.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got instead.
+      placeholder: |
+        I opened Research → NVDA → Technical and the 200-day moving average read 0.
+        I expected the value the analysis service computes.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Where you think it lives. A guess is fine; "not sure" is also fine.
+      multiple: true
+      options:
+        - gateway (Go)
+        - auth (Go)
+        - journal (Go)
+        - alerts (Go)
+        - paper (Go)
+        - feedback (Go)
+        - services/analysis (FastAPI)
+        - services/llm (FastAPI)
+        - services/events (FastAPI)
+        - services/prediction (FastAPI)
+        - web (React / Vite)
+        - docker compose / deploy
+        - docs
+        - not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: The shortest sequence that shows the problem. Include the request if it is an API issue.
+      placeholder: |
+        1. cp .env.example .env
+        2. docker compose up --build
+        3. curl -s localhost:8080/api/... | jq
+    validations:
+      required: true
+
+  - type: input
+    id: provenance
+    attributes:
+      label: Provenance label the UI showed
+      description: "`live`, `seed` or `synthetic` — a synthetic label often explains a surprising number."
+      placeholder: synthetic
+    validations:
+      required: false
+
+  - type: input
+    id: model-runtime
+    attributes:
+      label: Model runtime that served the read
+      description: Which runtime answered, if a model was involved at all. The deterministic stub counts.
+      placeholder: "Ollama qwen3:8b / vLLM / LM Studio / deterministic stub / none"
+    validations:
+      required: false
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: How you are running it, and at which commit.
+      placeholder: |
+        commit: 0e11a99
+        host: macOS 15.5, Apple M2
+        run mode: docker compose
+        postgres: postgres:16-alpine (from compose)
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste the failing output. Scrub API keys, `AUTH_SECRET` and anything else from your `.env`.
+      render: text
+    validations:
+      required: false
