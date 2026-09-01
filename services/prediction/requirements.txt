@@ -1,6 +1,6 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-pandas==2.2.3
+pandas==3.0.5
 numpy==2.2.1
 scikit-learn==1.5.2
 # LightGBM is CPU-only and tiny; the wheel needs OpenMP at runtime (libgomp1 in the Dockerfile).
