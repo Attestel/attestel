@@ -25,12 +25,12 @@ import (
 // "when did you last look at what changed" boundary. It is spelled out rather than derived so that
 // an unexpected registrar — from a later wave, or from a merge that duplicated an init() — is a
 // test failure and not a silent change in how the journal's routes are assembled. Bumped 2 -> 3 by
-// Wave 5B, per this file's header.
-const wantSubscriptionRegistrars = 3
+// Wave 5B and 3 -> 4 by the Hermes research agency lane (agency_routes.go), per this file's header.
+const wantSubscriptionRegistrars = 4
 
 func TestSubscriptionSeamIsWired(t *testing.T) {
 	if len(subscriptionRouteRegistrars) != wantSubscriptionRegistrars {
-		t.Fatalf("subscriptionRouteRegistrars = %d, want %d (subscriptions.go, event_state.go and last_check.go, one init() each)",
+		t.Fatalf("subscriptionRouteRegistrars = %d, want %d (subscriptions.go, event_state.go, last_check.go and agency_routes.go, one init() each)",
 			len(subscriptionRouteRegistrars), wantSubscriptionRegistrars)
 	}
 }

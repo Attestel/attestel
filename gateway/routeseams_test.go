@@ -33,14 +33,15 @@ const wantSubscriptionRegistrars = 1
 // Bumped 1 -> 2 by Wave 3 integration, 2 -> 4 by Wave 5B, 4 -> 5 by Phase 1's automation health
 // read (gateway/automation.go) and 5 -> 6 by Phase 4's reaction/sensitivity reads
 // (gateway/reactions.go), 6 -> 7 by Discovery Scout (gateway/scout.go), and 7 -> 8 by the Early
-// Opportunity Radar read (gateway/opportunities.go), per this file's header — each lane correctly did NOT edit main.go,
+// Opportunity Radar read (gateway/opportunities.go), and 8 -> 9 by the Hermes research agency proxy
+// (gateway/agency.go), per this file's header — each lane correctly did NOT edit main.go,
 // because a manual s.registerXRoutes(mux) there would double-register the pattern and panic the
 // mux.
-const wantEventRegistrars = 8
+const wantEventRegistrars = 9
 
 func TestSeamRegistrarsMatchWhatHasLanded(t *testing.T) {
 	if len(eventRouteRegistrars) != wantEventRegistrars {
-		t.Fatalf("eventRouteRegistrars = %d, want %d (feeds.go + context.go + changed.go + monitor.go + automation.go + reactions.go + scout.go + opportunities.go, one init() each)",
+		t.Fatalf("eventRouteRegistrars = %d, want %d (feeds.go + context.go + changed.go + monitor.go + automation.go + reactions.go + scout.go + opportunities.go + agency.go, one init() each)",
 			len(eventRouteRegistrars), wantEventRegistrars)
 	}
 	if len(subscriptionRouteRegistrars) != wantSubscriptionRegistrars {

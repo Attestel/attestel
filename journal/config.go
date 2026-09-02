@@ -35,6 +35,19 @@ type Config struct {
 	// activity — excluded from the default readout. Server-side only: a browser cannot flag itself.
 	AnalyticsSalt     string
 	AnalyticsDemoUIDs []string
+
+	// Hermes research agency (agency.go). Both default to OFF and both fail closed.
+	//
+	// AgencyOwnerUIDs is the allowlist of accounts that may create a research run. EMPTY MEANS
+	// NOBODY — the same posture gateway's EVAL_ADMIN_UIDS takes, and for the same reason: an
+	// unconfigured deployment must not expose an owner-only capability to whoever signs up first.
+	//
+	// AgencyWorkerToken authenticates the local bridge, and it is DELIBERATELY NOT `AUTH_SECRET`.
+	// AUTH_SECRET signs session cookies; a credential that lives on a laptop and can be turned into
+	// a session for an arbitrary user is a credential whose compromise is an account compromise.
+	// Empty disables the worker routes outright (403 naming this variable).
+	AgencyOwnerUIDs   []string
+	AgencyWorkerToken string
 }
 
 func loadConfig() Config {
@@ -54,6 +67,17 @@ func loadConfig() Config {
 
 		AnalyticsSalt:     env("ANALYTICS_SALT", env("AUTH_SECRET", "dev-insecure-change-me")),
 		AnalyticsDemoUIDs: splitCSV(env("ANALYTICS_DEMO_UIDS", "")),
+
+		// No fallback to AUTH_SECRET on either line, deliberately. See the field comments.
+		//
+		// TrimSpace on the token is load-bearing, not tidiness. The credential is generated with
+		// something like `openssl rand -hex 32`, which appends a newline, and several deployment
+		// platforms set a secret from a file verbatim — newline included. The bridge trims its own
+		// copy (`readToken`), so an untrimmed server value made the two differ by one byte and the
+		// constant-time compare failed on LENGTH. The symptom is a flat 401 on every claim with two
+		// values that look identical wherever you print them, which is close to undebuggable.
+		AgencyOwnerUIDs:   splitCSV(env("AGENCY_OWNER_UIDS", "")),
+		AgencyWorkerToken: strings.TrimSpace(env("AGENCY_WORKER_TOKEN", "")),
 	}
 }
 

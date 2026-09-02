@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { SubNav } from "../shell/SubNav.jsx";
 import InvestigationSection from "../research/InvestigationSection.jsx";
+import AgencySection from "../research/AgencySection.jsx";
 import ThesisSection from "../research/ThesisSection.jsx";
 import EvidenceSection from "../research/EvidenceSection.jsx";
 import PerspectivesSection from "../research/PerspectivesSection.jsx";
@@ -196,6 +197,11 @@ export default function ResearchView({
       {subview === "investigations" && (
         <InvestigationSection ticker={ticker} level={level} onOpenSection={goSection} />
       )}
+
+      {/* Research agency — the local Hermes workflow. Rendered only on its own subview:
+          opening Research must not queue a run, and this section queues nothing until the
+          button in it is pressed. */}
+      {subview === "agency" && <AgencySection ticker={ticker} />}
 
       {subview === "thesis" && <ThesisSection ticker={ticker} />}
 

@@ -20,7 +20,11 @@ type Server struct {
 	portfolioSnapshots *PortfolioSnapshotStore
 	portfolioReviews   *PortfolioReviewStore
 	documents          *documentRepository
-	http               *http.Client
+	// agency holds the owner-scoped Hermes research runs (agency_store.go). Nil when the lane is
+	// not configured, which every route in agency_routes.go treats as "switched off", never as
+	// "open".
+	agency *AgencyStore
+	http   *http.Client
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

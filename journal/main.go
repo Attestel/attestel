@@ -44,6 +44,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("cannot open portfolio review store in %q: %v", cfg.TradesDir, err)
 	}
+	// The Hermes research agency (agency.go). It is opened unconditionally so the routes can answer
+	// honestly, but with an EMPTY owner allowlist nobody can create a run and with no worker token
+	// the worker API is refused outright. Off by configuration, not by absence.
+	agency, err := openAgencyStoreWithRepository(cfg.TradesDir, cfg.AgencyOwnerUIDs, documents)
+	if err != nil {
+		log.Fatalf("cannot open agency run store in %q: %v", cfg.TradesDir, err)
+	}
 
 	// Self-hosted, server-side product events (§6). A package-level sink rather than a Server field:
 	// every emitter is a durable-write site inside this package, and this keeps the analytics lane's
@@ -58,6 +65,7 @@ func main() {
 		portfolioSnapshots: portfolioSnapshots,
 		portfolioReviews:   portfolioReviews,
 		documents:          documents,
+		agency:             agency,
 		http:               &http.Client{Timeout: 15 * time.Second},
 	}
 

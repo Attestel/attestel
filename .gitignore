@@ -53,9 +53,51 @@ yarn-error.log*
 /paper/paper
 /feedback/feedback
 /auth/auth
+/bridge/bridge
+/bridge/attestel-hermes-bridge
 *.exe
 *.test
 *.out
+
+# ─────────────────────────────────────────────────────────────
+# Local Hermes research bridge — WORKER STATE AND CREDENTIALS.
+#
+# The bridge runs on the owner's own machine. Everything it writes is local: an opaque worker id,
+# per-run scratch directories holding the rendered prompts and the raw (unvalidated) model output,
+# and whatever the operator points ATTESTEL_WORKER_TOKEN_FILE at. None of it belongs in a public
+# repository, and some of it (the token file, a Hermes usage report) would be a real disclosure.
+#
+# `.env` and `**/.env.*` above already cover env files; these rules cover the rest, plus the
+# credential filenames an operator is most likely to reach for. The committed
+# `bridge/attestel-hermes-bridge.env.example` is a PLACEHOLDER TEMPLATE and is negated below.
+# ─────────────────────────────────────────────────────────────
+/bridge/state/
+/bridge/run-*/
+**/attestel-hermes-bridge/
+worker-id
+worker-token
+worker-token.txt
+*.worker-token
+attestel-worker-token*
+hermes-usage*.json
+!bridge/attestel-hermes-bridge.env.example
+
+# Local Hermes state must never be staged from anywhere in this tree. It is not written here by
+# anything in this repository — this is a backstop against a stray copy, an export or a debug dump.
+.hermes/
+**/.hermes/
+auth.json
+**/auth.json
+hermes-config.yaml
+hermes-session*.db
+hermes-cron*.db
+
+# Local agent profiles and campaign working material. These are Hermes profile distributions
+# (SOUL.md / HERMES.md / config.yaml / distribution.yaml) and the drafts and experiment data that go
+# with them — the owner's own operating material, not source for this application. This repository's
+# remote is public, so an accidental `git add -A` would publish them; they are excluded here so that
+# cannot happen. Remove this rule deliberately if any of it ever becomes something to ship.
+/ops/
 
 # ─────────────────────────────────────────────────────────────
 # Runtime state / generated data (mounted volumes; not source)
