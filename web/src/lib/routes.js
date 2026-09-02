@@ -99,6 +99,12 @@ export const DESTINATIONS = [
       { id: "earnings", label: "Earnings", minLevel: "beginner" },
       { id: "investigations", label: "Investigations", minLevel: "beginner", hiddenInNav: true },
       { id: "thesis", label: "My Thesis", minLevel: "beginner", hiddenInNav: true },
+      // VISIBLE IN NAV. It was hiddenInNav, which made the only entry point to the feature a
+      // hand-typed `#research/agency` — a capability nobody can find is a capability nobody has.
+      // Owner-only is enforced where it belongs, at the journal: a non-owner who opens this sees an
+      // honest "owner-only on this deployment" panel rather than a broken page, which is a better
+      // answer than hiding the tab and is the same posture the evaluator surfaces already take.
+      { id: "agency", label: "Research agency", minLevel: "standard" },
       {
         id: "evidence",
         label: "Evidence",

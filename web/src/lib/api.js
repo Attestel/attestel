@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_GATEWAY_URL || "";
+const BASE = import.meta.env?.VITE_GATEWAY_URL || "";
 
 export const TIMEFRAMES = ["1D", "1H", "15m", "5m"];
 
@@ -38,7 +38,7 @@ async function request(url, opts = {}) {
 // ---- Accounts (auth service on :8099; the whole stack still runs zero-key / offline) -----------
 // Email/password + session cookie. Google is deferred (the button hits authGoogle -> 501 -> toast).
 
-const AUTH_BASE = import.meta.env.VITE_AUTH_URL || "http://localhost:8099";
+const AUTH_BASE = import.meta.env?.VITE_AUTH_URL || "http://localhost:8099";
 
 // Auth endpoints use a plain credentialed fetch (NOT `request`): here a 401 is a normal login
 // failure ("invalid email or password"), not an AuthRequiredError to route away on.
@@ -388,7 +388,7 @@ export async function deletePersona(id) {
 
 // ---- Alerts service (separate Go microservice on :8095; additive, fails silent if down) ----
 
-const ALERTS_BASE = import.meta.env.VITE_ALERTS_URL || "http://localhost:8095";
+const ALERTS_BASE = import.meta.env?.VITE_ALERTS_URL || "http://localhost:8095";
 
 // Rule types surfaced in the AlertsPanel form, with the params each one needs. Kept in sync with
 // alerts/rules.go. Descriptive conditions only — never buy/sell actions.
@@ -462,7 +462,7 @@ export async function markEventRead(id) {
 // ---- Journal service (separate Go microservice on :8096; additive, fails silent if down) ----
 // A manual RECORD of your own trades — it executes nothing and gives no advice.
 
-const JOURNAL_BASE = import.meta.env.VITE_JOURNAL_URL || "http://localhost:8096";
+const JOURNAL_BASE = import.meta.env?.VITE_JOURNAL_URL || "http://localhost:8096";
 
 async function journalJSON(path, opts) {
   const res = await request(`${JOURNAL_BASE}${path}`, opts);
@@ -520,7 +520,7 @@ export async function fetchJournalStats(mode = "all") {
 // ---- Paper-trading validation service (:8097; additive, fails silent if down) ----
 // SIMULATION ONLY — no execution, no broker, no money movement.
 
-const PAPER_BASE = import.meta.env.VITE_PAPER_URL || "http://localhost:8097";
+const PAPER_BASE = import.meta.env?.VITE_PAPER_URL || "http://localhost:8097";
 
 async function paperJSON(path, opts) {
   const res = await fetch(`${PAPER_BASE}${path}`, { credentials: "include", ...opts });
@@ -734,7 +734,7 @@ export async function deleteThesis(id) {
 //   403 -> AdminRequiredError   signed in, but not on the FEEDBACK_ADMIN_UIDS allow-list
 // Anything else stays a plain Error so the panel can keep failing soft when :8098 is genuinely gone.
 
-const FEEDBACK_BASE = import.meta.env.VITE_FEEDBACK_URL || "http://localhost:8098";
+const FEEDBACK_BASE = import.meta.env?.VITE_FEEDBACK_URL || "http://localhost:8098";
 
 // AdminRequiredError is thrown when a signed-in user asks for the owner-triage surface.
 export class AdminRequiredError extends Error {
