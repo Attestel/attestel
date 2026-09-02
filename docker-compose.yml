@@ -473,6 +473,12 @@ services:
       # reach a provider — the events service refuses to fetch on a read path.
       - EVENTS_URL=http://events:8004
       - COOKIE_NAME=${COOKIE_NAME:-nvda_session}
+      # Hermes research agency (docs/HERMES_AGENCY.md). BOTH default to EMPTY, and empty means the
+      # lane is OFF: nobody can create a run and the worker API refuses with a named-variable 403.
+      # AGENCY_WORKER_TOKEN is deliberately NOT defaulted to AUTH_SECRET — it lives on the owner's
+      # laptop, and AUTH_SECRET is the key that signs session cookies.
+      - AGENCY_OWNER_UIDS=${AGENCY_OWNER_UIDS:-}
+      - AGENCY_WORKER_TOKEN=${AGENCY_WORKER_TOKEN:-}
     volumes:
       - journal:/data/journal # one-time legacy import + explicit no-DB fallback
     depends_on:
