@@ -383,7 +383,7 @@ jobs:
           total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')"
           echo "### go / ${{ matrix.module }} — coverage $total" >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: coverage-go-${{ matrix.module }}
@@ -494,7 +494,7 @@ jobs:
       - name: no server-only field reaches the built bundle
         run: ./scripts/check-web-bundle.sh web/dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: web/dist
