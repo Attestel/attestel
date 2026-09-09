@@ -8,6 +8,6 @@ lightgbm==4.7.0
 requests==2.34.2
 # Durable production model/verdict/report storage. File storage remains the no-DATABASE_URL test
 # fallback; compose and container deploys configure PostgreSQL.
-psycopg[binary]==3.3.4
+psycopg[binary]==3.3.5
 # NOTE: Chronos (optional overlay) is intentionally NOT a hard dependency. It is only imported when
 # ENABLE_CHRONOS=true; the core LightGBM signal must build and run without it.
