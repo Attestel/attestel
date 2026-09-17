@@ -12,8 +12,8 @@
   "dependencies": {
     "framer-motion": "^13.1.1",
     "lightweight-charts": "^5.2.1",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
