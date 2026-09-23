@@ -1,13 +1,13 @@
 fastapi==0.141.1
-uvicorn[standard]==0.52.4
-pandas==3.0.5
+uvicorn[standard]==0.53.0
+pandas==3.0.6
 numpy==2.4.6
-scikit-learn==1.9.0
+scikit-learn==1.9.1
 # LightGBM is CPU-only and tiny; the wheel needs OpenMP at runtime (libgomp1 in the Dockerfile).
 lightgbm==4.7.0
 requests==2.34.2
 # Durable production model/verdict/report storage. File storage remains the no-DATABASE_URL test
 # fallback; compose and container deploys configure PostgreSQL.
-psycopg[binary]==3.3.4
+psycopg[binary]==3.3.6
 # NOTE: Chronos (optional overlay) is intentionally NOT a hard dependency. It is only imported when
 # ENABLE_CHRONOS=true; the core LightGBM signal must build and run without it.
