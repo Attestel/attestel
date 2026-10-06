@@ -138,6 +138,35 @@ func (s *AgencyStore) persistLocked(uid string, bucket *agencyBucket) error {
 	return os.Rename(tmp, s.path(uid))
 }
 
+// SnapshotIDsInUse returns the snapshot ids this user's NON-TERMINAL runs still depend on.
+//
+// It is the retention pin the snapshot store consults (experiment_snapshot_store.go). A queued or
+// running review has not read its evidence yet — the worker fetches it after claiming — so dropping
+// that snapshot would break a job the owner legitimately started. A run that has already completed,
+// failed, been cancelled or expired pins nothing: its review, if any, is stored on the run itself.
+//
+// It takes this store's lock and reaches into nothing else, which is what keeps the
+// snapshots → agency call order acyclic.
+func (s *AgencyStore) SnapshotIDsInUse(uid string) map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bucket, err := s.loadLocked(uid)
+	if err != nil {
+		// AN UNREADABLE RUN LIST PINS NOTHING, AND THAT IS THE SAFE DIRECTION HERE. The alternative
+		// — refusing to retain at all — would let one corrupt document stop every snapshot write for
+		// that owner. A dropped snapshot fails one review with a stated reason; a blocked write
+		// fails all of them.
+		return nil
+	}
+	out := map[string]bool{}
+	for _, run := range bucket.items {
+		if run.SnapshotID != "" && !run.terminal() {
+			out[run.SnapshotID] = true
+		}
+	}
+	return out
+}
+
 // ─────────────────────────────────────────────────────────────────────────────── owner operations
 
 // Create returns the run for this request. If a live run already exists for the same idempotency
@@ -168,10 +197,62 @@ func (s *AgencyStore) Create(uid, ticker, question string, now time.Time) (Agenc
 		UserID:          uid,
 		SchemaVersion:   agencyJobSchemaVersion,
 		WorkflowVersion: agencyWorkflowCompanyResearch,
+		Kind:            workflowKindResearch,
 		IdempotencyKey:  key,
 		Ticker:          ticker,
 		Question:        question,
 		// Server-assigned, never worker-supplied. See AgencyRun.AsOf.
+		AsOf:      now.UTC().Format(time.RFC3339),
+		Status:    agencyQueued,
+		CreatedAt: now.Unix(),
+	}
+	bucket.items = append(bucket.items, run)
+	if err := s.persistLocked(uid, bucket); err != nil {
+		return AgencyRun{}, false, err
+	}
+	return run, true, nil
+}
+
+// CreateReview enqueues a run of `experiment_review_v1` against a STORED snapshot id.
+//
+// It is a separate constructor rather than a parameter on `Create` because the two runs are
+// different records: a review has no ticker and no question, a research run has no snapshot, and a
+// single constructor taking both would be a constructor that could build a run that is neither.
+//
+// The attach-don't-start rule is the same one `Create` applies. The idempotency key is over
+// (uid, workflow, snapshot) with an empty question, so pressing the button twice against one
+// snapshot attaches to the live run instead of spending the owner's machine twice on identical
+// evidence — the snapshot is immutable, so a second run could only produce the same reading.
+func (s *AgencyStore) CreateReview(uid, snapshotID string, now time.Time) (AgencyRun, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bucket, err := s.loadLocked(uid)
+	if err != nil {
+		return AgencyRun{}, false, err
+	}
+	s.reconcileLocked(bucket, now)
+
+	key := agencyIdempotencyKey(uid, agencyWorkflowExperimentReview, snapshotID, "")
+	for _, run := range bucket.items {
+		if run.IdempotencyKey == key && !run.terminal() {
+			return run, false, nil
+		}
+	}
+
+	id, err := newAgencyRunID()
+	if err != nil {
+		return AgencyRun{}, false, err
+	}
+	run := AgencyRun{
+		ID:              id,
+		UserID:          uid,
+		SchemaVersion:   agencyReviewJobSchemaVersion,
+		WorkflowVersion: agencyWorkflowExperimentReview,
+		Kind:            workflowKindReview,
+		SnapshotID:      snapshotID,
+		IdempotencyKey:  key,
+		// Server-assigned, never worker-supplied — the same rule `Create` states. The SNAPSHOT
+		// carries its own, earlier cutoff; this one is the moment the review was asked for.
 		AsOf:      now.UTC().Format(time.RFC3339),
 		Status:    agencyQueued,
 		CreatedAt: now.Unix(),
@@ -262,7 +343,15 @@ func (s *AgencyStore) Cancel(uid, id string, now time.Time) (AgencyRun, bool, er
 
 // Claim takes the oldest claimable run across the configured owners and returns it with a fresh
 // lease. `ok == false` means there is nothing to do, which is the ordinary answer.
-func (s *AgencyStore) Claim(workerID string, lease time.Duration, now time.Time) (AgencyRun, bool, error) {
+//
+// `declared` is the WORKER'S OWN allowlist, already filtered to workflows this server dispatches.
+// A run whose workflow the worker did not declare is skipped rather than handed over — so a bridge
+// built before a workflow existed can never be given one, and a bridge that only wants to run
+// research is never given a review. Fail closed: an empty list claims nothing.
+func (s *AgencyStore) Claim(workerID string, declared []string, lease time.Duration, now time.Time) (AgencyRun, bool, error) {
+	if len(declared) == 0 {
+		return AgencyRun{}, false, nil
+	}
 	if lease <= 0 || lease > agencyMaxLeaseDuration {
 		lease = agencyLeaseDuration
 	}
@@ -282,6 +371,9 @@ func (s *AgencyStore) Claim(workerID string, lease time.Duration, now time.Time)
 		oldest := -1
 		for i := range bucket.items {
 			if !bucket.items[i].claimable(now) {
+				continue
+			}
+			if !containsString(declared, bucket.items[i].WorkflowVersion) {
 				continue
 			}
 			if oldest < 0 || bucket.items[i].CreatedAt < bucket.items[oldest].CreatedAt {
@@ -404,6 +496,12 @@ func (s *AgencyStore) Heartbeat(uid, id, token, stage string, lease time.Duratio
 		if !run.leaseHeld(now) || !agencyTokenEqual(run.LeaseToken, token) {
 			return AgencyRun{}, errAgencyStaleLease
 		}
+		// The stage must belong to THIS run's chain, not merely to some registered workflow's. The
+		// route already refused anything outside the union of the chains; this is the check that
+		// knows which run it is, and it is the one that matters.
+		if stage != "" && !containsString(agencyChainFor(run.WorkflowVersion), stage) {
+			return AgencyRun{}, fmt.Errorf("stage %q is not part of %s", stage, run.WorkflowVersion)
+		}
 		run.Status = agencyRunning
 		run.HeartbeatAt = now.Unix()
 		run.LeaseExpiresAt = now.Add(lease).Unix()
@@ -438,6 +536,13 @@ func (s *AgencyStore) Complete(uid, id, token string, artifact *AgencyArtifact, 
 		if run.ID != id {
 			continue
 		}
+		// The mirror of the check in `CompleteReview`. Neither kind may be completed with the
+		// other's artifact: they say different things, and a record that silently accepted the
+		// wrong one would look exactly like a correct one.
+		if run.isReview() {
+			return AgencyRun{}, invalidArtifact("run %q is a %s run and cannot be completed with a "+
+				"research artifact", run.ID, run.WorkflowVersion)
+		}
 		if run.Status == agencyCompleted {
 			if agencyTokenEqual(run.CompletedByLease, token) {
 				return *run, nil // idempotent replay of OUR completion
@@ -452,6 +557,65 @@ func (s *AgencyStore) Complete(uid, id, token string, artifact *AgencyArtifact, 
 		}
 		run.Status = agencyCompleted
 		run.Artifact = artifact
+		run.FinishedAt = now.Unix()
+		run.CompletedByLease = token
+		run.LeaseToken = ""
+		run.LeaseExpiresAt = 0
+		run.Error = ""
+		run.Stage = ""
+		if err := s.persistLocked(uid, bucket); err != nil {
+			return AgencyRun{}, err
+		}
+		return *run, nil
+	}
+	return AgencyRun{}, errAgencyRunNotFound
+}
+
+// CompleteReview stores a validated review artifact.
+//
+// Same lease semantics as `Complete`, for the same reasons — idempotent for the lease that produced
+// the stored result, refused for any other — and one extra check: the run must BE a review. A
+// research run completed with a review artifact (or the reverse) is refused rather than coerced,
+// because the two say different things and a record that silently accepted the wrong one would be
+// indistinguishable from a correct one.
+//
+// `snap` is the stored snapshot the run was created against. It is passed in rather than looked up
+// here so this store keeps its single responsibility, and it is what `validateExperimentReview`
+// checks every citation against.
+func (s *AgencyStore) CompleteReview(uid, id, token string, artifact *ExperimentReviewArtifact, snap ExperimentSnapshot, now time.Time) (AgencyRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bucket, err := s.loadLocked(uid)
+	if err != nil {
+		return AgencyRun{}, err
+	}
+	for i := range bucket.items {
+		run := &bucket.items[i]
+		if run.ID != id {
+			continue
+		}
+		if !run.isReview() {
+			return AgencyRun{}, invalidArtifact("run %q is a %s run and cannot be completed with a "+
+				"review artifact", run.ID, run.WorkflowVersion)
+		}
+		if run.Status == agencyCompleted {
+			if agencyTokenEqual(run.CompletedByLease, token) {
+				return *run, nil // idempotent replay of OUR completion
+			}
+			return AgencyRun{}, errAgencyStaleLease
+		}
+		if !run.leaseHeld(now) || !agencyTokenEqual(run.LeaseToken, token) {
+			return AgencyRun{}, errAgencyStaleLease
+		}
+		if snap.ID == "" || snap.ID != run.SnapshotID {
+			return AgencyRun{}, invalidArtifact("the snapshot run %q was created against is no "+
+				"longer readable, so the review's citations cannot be checked", run.ID)
+		}
+		if err := validateExperimentReview(artifact, *run, snap); err != nil {
+			return AgencyRun{}, err
+		}
+		run.Status = agencyCompleted
+		run.Review = artifact
 		run.FinishedAt = now.Unix()
 		run.CompletedByLease = token
 		run.LeaseToken = ""
