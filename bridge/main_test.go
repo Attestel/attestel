@@ -28,19 +28,27 @@ type fakeClient struct {
 	fail       error
 	failCalls  int
 	claimCalls int
+
+	// The review lane.
+	snapshot            *ExperimentSnapshot
+	snapshotErr         error
+	snapshotCalls       int
+	completeReview      error
+	completeReviewCalls int
 }
 
 // claimStep is one scripted answer to Claim: a job, an empty queue, or an error.
 type claimStep struct {
-	job *Job
-	err error
+	job    *Job
+	review *ReviewJob
+	err    error
 }
 
 func (f *fakeClient) Status(context.Context) (workerStatus, error) {
 	return f.status, f.statusErr
 }
 
-func (f *fakeClient) Claim(context.Context, Config) (*Job, bool, error) {
+func (f *fakeClient) Claim(context.Context, Config) (*claimedJob, bool, error) {
 	f.claimCalls++
 	if f.claimIdx >= len(f.claims) {
 		return nil, false, nil // queue empty
@@ -50,17 +58,39 @@ func (f *fakeClient) Claim(context.Context, Config) (*Job, bool, error) {
 	if step.err != nil {
 		return nil, false, step.err
 	}
+	if step.review != nil {
+		return &claimedJob{Review: step.review}, true, nil
+	}
 	if step.job == nil {
 		return nil, false, nil
 	}
-	return step.job, true, nil
+	return &claimedJob{Research: step.job}, true, nil
 }
 
-func (f *fakeClient) Heartbeat(context.Context, *Job, string, Config) error { return f.heartbeat }
-func (f *fakeClient) Complete(context.Context, *Job, *Artifact) error       { return f.complete }
-func (f *fakeClient) Fail(context.Context, *Job, string, bool) error {
+func (f *fakeClient) Heartbeat(context.Context, jobRef, string, Config) error { return f.heartbeat }
+func (f *fakeClient) Complete(context.Context, *Job, *Artifact) error         { return f.complete }
+func (f *fakeClient) Fail(context.Context, jobRef, string, bool) error {
 	f.failCalls++
 	return f.fail
+}
+
+// The review lane. `snapshot` defaults to nil, which every existing test wants: a research-only
+// fake that is asked for a snapshot has been asked for something it should never be asked for, and
+// saying so is more useful than returning an empty document.
+func (f *fakeClient) Snapshot(context.Context, *ReviewJob) (*ExperimentSnapshot, error) {
+	f.snapshotCalls++
+	if f.snapshotErr != nil {
+		return nil, f.snapshotErr
+	}
+	if f.snapshot == nil {
+		return nil, errf("this fake client was not given an evidence snapshot")
+	}
+	return f.snapshot, nil
+}
+
+func (f *fakeClient) CompleteReview(context.Context, *ReviewJob, *ExperimentReviewArtifact) error {
+	f.completeReviewCalls++
+	return f.completeReview
 }
 
 func fakeJob() *Job {
