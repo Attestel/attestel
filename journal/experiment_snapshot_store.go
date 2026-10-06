@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -90,26 +91,43 @@ func (s *ExperimentSnapshotStore) path(uid string) string {
 	return filepath.Join(s.base, uid, experimentSnapshotCollection+".json")
 }
 
-func (s *ExperimentSnapshotStore) loadLocked(uid string) (*experimentSnapshotBucket, error) {
+func (s *ExperimentSnapshotStore) safeUID(uid string) (string, error) {
+	uid = strings.TrimSpace(uid)
 	if uid == "" {
-		return nil, errors.New("user id is required")
+		return "", errors.New("user id is required")
 	}
-	if bucket, ok := s.cache[uid]; ok && bucket.loaded {
+	if uid == "." || uid == ".." {
+		return "", errors.New("invalid user id")
+	}
+	if strings.Contains(uid, "/") || strings.Contains(uid, "\\") {
+		return "", errors.New("invalid user id")
+	}
+	if filepath.Base(uid) != uid {
+		return "", errors.New("invalid user id")
+	}
+	return uid, nil
+}
+
+func (s *ExperimentSnapshotStore) loadLocked(uid string) (*experimentSnapshotBucket, error) {
+	safeUID, err := s.safeUID(uid)
+	if err != nil {
+		return nil, err
+	}
+	if bucket, ok := s.cache[safeUID]; ok && bucket.loaded {
 		return bucket, bucket.err
 	}
 	bucket := &experimentSnapshotBucket{loaded: true, items: []ExperimentSnapshot{}}
 	var b []byte
-	var err error
 	if s.docs != nil {
-		b, _, err = s.docs.load(uid, experimentSnapshotCollection, s.path(uid))
+		b, _, err = s.docs.load(safeUID, experimentSnapshotCollection, s.path(safeUID))
 	} else {
-		b, err = os.ReadFile(s.path(uid))
+		b, err = os.ReadFile(s.path(safeUID))
 	}
 	if err != nil {
 		if !os.IsNotExist(err) {
 			bucket.err = fmt.Errorf("read experiment snapshots: %w", err)
 		}
-		s.cache[uid] = bucket
+		s.cache[safeUID] = bucket
 		return bucket, bucket.err
 	}
 	if len(b) > 0 {
@@ -120,7 +138,7 @@ func (s *ExperimentSnapshotStore) loadLocked(uid string) (*experimentSnapshotBuc
 	if bucket.items == nil {
 		bucket.items = []ExperimentSnapshot{}
 	}
-	s.cache[uid] = bucket
+	s.cache[safeUID] = bucket
 	return bucket, bucket.err
 }
 
