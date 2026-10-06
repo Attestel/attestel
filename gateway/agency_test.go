@@ -113,6 +113,13 @@ func TestTheGatewayNeverProxiesTheWorkerAPI(t *testing.T) {
 		"/api/agency/runs/agr_1/heartbeat",
 		"/api/agency/runs/agr_1/fail",
 		"/_internal/agency/claim",
+		// The review lane's two worker routes. `snapshot` is a read, but it carries a lease token
+		// and is scoped to a run a worker holds; a browser has no business on it whatever its
+		// session says.
+		"/api/_internal/agency/runs/agr_1/snapshot",
+		"/api/agency/runs/agr_1/snapshot",
+		"/api/agency/runs/agr_1/complete-review",
+		"/_internal/agency/runs/agr_1/complete-review",
 	} {
 		w := agencyRequest(t, srv, http.MethodPost, path, "{}", "owner-uid")
 		if w.Code != http.StatusNotFound {
@@ -169,5 +176,44 @@ func TestAJournalOutageIsReportedRatherThanFabricated(t *testing.T) {
 	}
 	if strings.Contains(w.Body.String(), `"runs":[]`) {
 		t.Fatalf("an outage was rendered as an empty result: %s", w.Body.String())
+	}
+}
+
+// The review lane's OWNER routes are proxied, and they carry the caller's cookie to the journal —
+// which is where the owner allowlist is checked, next to the data.
+func TestTheExperimentReviewOwnerRoutesAreProxied(t *testing.T) {
+	for _, tc := range []struct {
+		method, path, want string
+	}{
+		{http.MethodPost, "/api/experiments/snapshots", "/experiments/snapshots"},
+		{http.MethodGet, "/api/experiments/snapshots", "/experiments/snapshots"},
+		{http.MethodGet, "/api/experiments/snapshots/exs_abc", "/experiments/snapshots/exs_abc"},
+		{http.MethodPost, "/api/agency/reviews", "/agency/reviews"},
+	} {
+		srv, fake := agencyServer(t)
+		agencyRequest(t, srv, tc.method, tc.path, "{}", "owner-uid")
+		if fake.seenPath != tc.want {
+			t.Errorf("%s %s reached the journal at %q, want %q",
+				tc.method, tc.path, fake.seenPath, tc.want)
+		}
+	}
+}
+
+// A guest is refused at the gateway without a network hop, exactly as the research routes are.
+func TestTheExperimentReviewRoutesRefuseAGuest(t *testing.T) {
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPost, "/api/experiments/snapshots"},
+		{http.MethodGet, "/api/experiments/snapshots"},
+		{http.MethodGet, "/api/experiments/snapshots/exs_abc"},
+		{http.MethodPost, "/api/agency/reviews"},
+	} {
+		srv, fake := agencyServer(t)
+		w := agencyRequest(t, srv, tc.method, tc.path, "{}", "")
+		if w.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s as a guest = %d, want 401", tc.method, tc.path, w.Code)
+		}
+		if fake.seenPath != "" {
+			t.Errorf("%s %s reached the journal as a guest", tc.method, tc.path)
+		}
 	}
 }

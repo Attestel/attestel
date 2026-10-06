@@ -312,7 +312,18 @@ func (s *Server) handleThesisCheck(w http.ResponseWriter, r *http.Request) {
 // instead of a shrug. Ownership is still resolved entirely by the journal from the forwarded session
 // — the gateway adds no authority of its own. Fail-soft: an unreachable journal is a readable 502.
 func (s *Server) proxyJournal(w http.ResponseWriter, r *http.Request, method, path string) {
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	s.proxyJournalWithin(w, r, method, path, defaultJournalProxyTimeout)
+}
+
+// defaultJournalProxyTimeout is right for the store reads every caller of `proxyJournal` performs.
+// One caller — freezing an experiment evidence snapshot — reads five LIVE upstreams through the
+// journal and needs its own, longer budget; it uses `proxyJournalWithin` directly rather than
+// raising this one for everybody.
+const defaultJournalProxyTimeout = 15 * time.Second
+
+// proxyJournalWithin is `proxyJournal` with an explicit budget.
+func (s *Server) proxyJournalWithin(w http.ResponseWriter, r *http.Request, method, path string, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
 	var body io.Reader
