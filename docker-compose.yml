@@ -479,6 +479,10 @@ services:
       # laptop, and AUTH_SECRET is the key that signs session cookies.
       - AGENCY_OWNER_UIDS=${AGENCY_OWNER_UIDS:-}
       - AGENCY_WORKER_TOKEN=${AGENCY_WORKER_TOKEN:-}
+      # Read ONLY, and only to assemble an experiment evidence snapshot
+      # (journal/paper_client.go). The journal issues nothing but GETs against this service and has
+      # no method that could reach /paper/reset or /paper/config.
+      - PAPER_URL=http://paper:8097
     volumes:
       - journal:/data/journal # one-time legacy import + explicit no-DB fallback
     depends_on:
@@ -529,6 +533,11 @@ services:
       # on purpose, so stale data is refused slightly early rather than slightly late.
       - PAPER_MAX_BAR_AGE_SESSIONS=${PAPER_MAX_BAR_AGE_SESSIONS:-3}
       - PAPER_MAX_MODEL_AGE_SESSIONS=${PAPER_MAX_MODEL_AGE_SESSIONS:-10}
+      # The deployed build, stamped onto every payload an experiment evidence snapshot composes so
+      # a stored snapshot can name the code that produced it. UNSET is the literal string
+      # "unavailable", never "" — a consumer must be able to tell "this deployment did not state its
+      # revision" from "a field somebody forgot to fill in".
+      - ATTESTEL_REVISION=${ATTESTEL_REVISION:-}
       # The engine's service credential (D-20 interim (a)) AND the verifier for this service's two
       # MUTATING routes (POST /paper/reset, POST /paper/config). It was omitted here entirely, which
       # meant two things at once in the compose deployment: the journal rejected every simulated
