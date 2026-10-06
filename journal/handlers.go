@@ -24,7 +24,15 @@ type Server struct {
 	// not configured, which every route in agency_routes.go treats as "switched off", never as
 	// "open".
 	agency *AgencyStore
-	http   *http.Client
+	// snapshots holds the owner-scoped, immutable experiment evidence snapshots
+	// (experiment_snapshot_store.go). Nil when the lane is not configured, which every route in
+	// experiment_routes.go treats as "switched off", never as "open".
+	snapshots *ExperimentSnapshotStore
+	http      *http.Client
+	// paperHTTP is the snapshot lane's DEDICATED client. It is separate from `http` because that
+	// one carries a 15-second whole-request ceiling that would silently clamp a readiness read and
+	// record a healthy deployment as `unavailable`. See paper_client.go::newPaperClient.
+	paperHTTP *http.Client
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

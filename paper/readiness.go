@@ -22,12 +22,17 @@ type configReadiness struct {
 }
 
 type experimentReadiness struct {
-	Ready     bool              `json:"ready"`
-	CheckedAt string            `json:"checkedAt"`
-	Checks    []readinessCheck  `json:"checks"`
-	Configs   []configReadiness `json:"configs"`
-	Blockers  []string          `json:"blockers"`
-	Note      string            `json:"note"`
+	Ready     bool   `json:"ready"`
+	CheckedAt string `json:"checkedAt"`
+	// The experiment generation and the deployed build this checklist was evaluated under. Served
+	// so an evidence snapshot can prove this payload and the other three came from ONE generation;
+	// a checklist read across a reset is a checklist about two different experiments.
+	Generation int64             `json:"generation"`
+	Revision   string            `json:"revision"`
+	Checks     []readinessCheck  `json:"checks"`
+	Configs    []configReadiness `json:"configs"`
+	Blockers   []string          `json:"blockers"`
+	Note       string            `json:"note"`
 }
 
 func (r *experimentReadiness) add(check readinessCheck) {
@@ -56,7 +61,11 @@ func (r *experimentReadiness) addConfig(row configReadiness) {
 // It never mutates state. A negative evaluator verdict is a successful check result whose gate is
 // false; it is never converted into an error and never bypassed.
 func (a *API) readinessLocked(ctx context.Context, now time.Time) experimentReadiness {
-	r := experimentReadiness{CheckedAt: now.UTC().Format(time.RFC3339)}
+	r := experimentReadiness{
+		CheckedAt:  now.UTC().Format(time.RFC3339),
+		Generation: a.generation(),
+		Revision:   a.cfg.Revision,
+	}
 	configs := a.store.Configs()
 
 	r.add(readinessCheck{

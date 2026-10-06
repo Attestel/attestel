@@ -207,12 +207,12 @@ func runCheck(ctx context.Context, cfg Config, client hostedClient, runner herme
 	fmt.Printf("  worker credential : read, %d characters, value withheld\n", len(cfg.Token))
 	fmt.Printf("  lease / stage / run budget : %ds / %ds / %ds\n",
 		cfg.LeaseSeconds, cfg.StageBudgetSeconds, cfg.RunBudgetSeconds)
-	fmt.Printf("  workflow          : %s\n", workflowCompanyResearch)
+	fmt.Printf("  workflows         : %s\n", joinComma(workerWorkflows()))
 
 	var problems []string
 
 	fmt.Println("prompt templates")
-	for _, spec := range companyResearchChain {
+	for _, spec := range append(append([]stageSpec{}, companyResearchChain...), experimentReviewChain...) {
 		if _, err := loadPromptTemplate(cfg, spec.PromptFile); err != nil {
 			fmt.Printf("  %-24s MISSING (%v)\n", spec.PromptFile, err)
 			problems = append(problems, "prompt template "+spec.PromptFile)
@@ -220,6 +220,16 @@ func runCheck(ctx context.Context, cfg Config, client hostedClient, runner herme
 			fmt.Printf("  %-24s ok\n", spec.PromptFile)
 		}
 	}
+
+	// The REVIEW chain's wrappers are collected separately and judged AFTER the hosted call.
+	//
+	// WHY THE DELAY. A deployment that does not offer `experiment_review_v1` will never dispatch a
+	// review, so missing `experiment-auditor` / `evidence-skeptic` / `experiment-chair` wrappers are
+	// not a problem there — they are three profiles the operator has no reason to have created.
+	// Failing `-check` over them would tell an operator their working configuration is broken.
+	// Against a deployment that DOES offer reviews, the same three missing wrappers mean every
+	// review this bridge claims will fail, so they are a problem and `-check` must say so.
+	var missingReviewWrappers []string
 
 	fmt.Println("Hermes profile wrappers")
 	if _, isStub := runner.(stubRunner); isStub {
@@ -234,6 +244,15 @@ func runCheck(ctx context.Context, cfg Config, client hostedClient, runner herme
 				// layout. A resolvable wrapper means the alias exists; whether the profile behind
 				// it has a working model configured is the owner's to verify, and this bridge
 				// deliberately never reads their Hermes configuration to find out.
+				fmt.Printf("  %-24s ok (wrapper resolved)\n", spec.Profile)
+			}
+		}
+		for _, spec := range experimentReviewChain {
+			if _, err := resolveProfileBinary(spec.Profile); err != nil {
+				fmt.Printf("  %-24s not found (only needed for %s)\n",
+					spec.Profile, workflowExperimentReview)
+				missingReviewWrappers = append(missingReviewWrappers, spec.Profile)
+			} else {
 				fmt.Printf("  %-24s ok (wrapper resolved)\n", spec.Profile)
 			}
 		}
@@ -272,6 +291,26 @@ func runCheck(ctx context.Context, cfg Config, client hostedClient, runner herme
 		} else {
 			fmt.Printf("  lease compatibility     ok (%ds requested, server cap %ds)\n",
 				cfg.LeaseSeconds, *status.MaxLeaseSeconds)
+		}
+
+		// The review lane, judged against what this deployment actually offers. See the comment
+		// beside `missingReviewWrappers`.
+		if status.offersReview() {
+			fmt.Printf("  experiment review        offered (review schema %s · %s)\n",
+				status.ReviewJobSchemaVersion, status.ReviewArtifactSchemaVersion)
+			if len(missingReviewWrappers) > 0 {
+				fmt.Printf("  review profile wrappers FAILED — this deployment dispatches %s and "+
+					"the wrapper(s) for %s are not on PATH; every review claimed would fail\n",
+					workflowExperimentReview, joinComma(missingReviewWrappers))
+				fmt.Printf("  fix: `hermes profile alias <profile>` for each, after creating the " +
+					"profiles themselves\n")
+				problems = append(problems, "review profile wrappers")
+			} else if _, isStub := runner.(stubRunner); !isStub {
+				fmt.Printf("  review profile wrappers ok\n")
+			}
+		} else {
+			fmt.Printf("  experiment review        not offered by this deployment; %s will never "+
+				"be claimed\n", workflowExperimentReview)
 		}
 	}
 

@@ -377,7 +377,7 @@ func TestAnExpiredLeaseIsReclaimedAndTheOldWorkerCannotOverwriteTheResult(t *tes
 
 	// Age the lease out.
 	now := time.Now().UTC().Add(2 * agencyMaxLeaseDuration)
-	run, ok, err := srv.agency.Claim("wkr_second", agencyLeaseDuration, now)
+	run, ok, err := srv.agency.Claim("wkr_second", agencyWorkflowNames(), agencyLeaseDuration, now)
 	if err != nil || !ok {
 		t.Fatalf("an expired lease was not reclaimable (ok=%v err=%v)", ok, err)
 	}
@@ -408,7 +408,7 @@ func TestARunIsTerminallyExpiredAfterTheAttemptCap(t *testing.T) {
 
 	now := time.Now().UTC()
 	for i := 0; i < agencyMaxAttempts; i++ {
-		if _, ok, err := srv.agency.Claim("wkr", agencyLeaseDuration, now); err != nil || !ok {
+		if _, ok, err := srv.agency.Claim("wkr", agencyWorkflowNames(), agencyLeaseDuration, now); err != nil || !ok {
 			t.Fatalf("claim %d failed (ok=%v err=%v)", i+1, ok, err)
 		}
 		now = now.Add(2 * agencyMaxLeaseDuration)
@@ -421,7 +421,7 @@ func TestARunIsTerminallyExpiredAfterTheAttemptCap(t *testing.T) {
 	if runs[0].Status != agencyExpired {
 		t.Fatalf("status after %d attempts = %q, want %q", agencyMaxAttempts, runs[0].Status, agencyExpired)
 	}
-	if _, ok, _ := srv.agency.Claim("wkr", agencyLeaseDuration, now); ok {
+	if _, ok, _ := srv.agency.Claim("wkr", agencyWorkflowNames(), agencyLeaseDuration, now); ok {
 		t.Fatal("an expired run was claimed again")
 	}
 }

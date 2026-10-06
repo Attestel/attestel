@@ -80,7 +80,14 @@ func freePort(t *testing.T) string {
 }
 
 // startJournal compiles and runs the real hosted service, returning its base URL.
+// startJournal starts the journal with no paper service configured. Every experiment-evidence
+// source is therefore `unavailable`, which is a state the snapshot lane must be able to record —
+// the research end-to-end test never touches it.
 func startJournal(t *testing.T) string {
+	return startJournalWithPaper(t, "")
+}
+
+func startJournalWithPaper(t *testing.T, paperURL string) string {
 	t.Helper()
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("the Go toolchain is not on PATH; the end-to-end test needs it to build the journal")
@@ -111,6 +118,9 @@ func startJournal(t *testing.T) string {
 		"AGENCY_WORKER_TOKEN=" + e2eToken,
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + t.TempDir(),
+	}
+	if paperURL != "" {
+		cmd.Env = append(cmd.Env, "PAPER_URL="+paperURL)
 	}
 	var logs bytes.Buffer
 	cmd.Stdout = &logs
@@ -382,10 +392,10 @@ func TestACancelledRunCannotBeCompletedByTheWorkerThatHeldIt(t *testing.T) {
 	}
 
 	// Every remaining worker call on that lease is refused with 409.
-	if err := client.Heartbeat(context.Background(), job, "stock-scout", cfg); !isStaleLease(err) {
+	if err := client.Heartbeat(context.Background(), job.ref(), "stock-scout", cfg); !isStaleLease(err) {
 		t.Fatalf("heartbeat after cancellation = %v, want a 409 stale-lease refusal", err)
 	}
-	if err := client.Complete(context.Background(), job, &Artifact{}); !isStaleLease(err) {
+	if err := client.Complete(context.Background(), job.Research, &Artifact{}); !isStaleLease(err) {
 		t.Fatalf("complete after cancellation = %v, want a 409 stale-lease refusal", err)
 	}
 
