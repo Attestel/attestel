@@ -88,7 +88,15 @@ func (g gateInputs) noSyntheticData() gateResult {
 	if g.pred == nil {
 		return gateResult{Name: name, Detail: "no prediction response to judge"}
 	}
-	if g.pred.TrainedOnSynthetic {
+	// A RECORD THAT DOES NOT STATE ITS TRAINING PROVENANCE IS REFUSED, exactly as one that states
+	// synthetic training is. `trainedOnSynthetic` used to be a plain bool here, so an ABSENT field
+	// decoded as `false` and passed — silence read as a denial. Unknown provenance is unknown.
+	if g.pred.TrainedOnSynthetic == nil {
+		return gateResult{Name: name, Detail: "the model record does not state whether it was " +
+			"trained on synthetic data (/predict served no trainedOnSynthetic field); unknown " +
+			"provenance is not clean provenance"}
+	}
+	if *g.pred.TrainedOnSynthetic {
 		return gateResult{Name: name, Detail: "the model record was trained on synthetic data " +
 			"(trainedOnSynthetic=true) — a backtest of a model fitted on invented prices is not evidence"}
 	}

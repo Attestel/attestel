@@ -29,10 +29,21 @@ type predictResp struct {
 		ProbUp     float64 `json:"probUp"`
 		Confidence float64 `json:"confidence"`
 	} `json:"signal"`
-	Backtest           map[string]any `json:"backtest"`
-	TrainedOnSynthetic bool           `json:"trainedOnSynthetic"`
-	DataThrough        string         `json:"dataThrough"` // last bar the model was trained through
-	Reason             string         `json:"reason"`
+	Backtest map[string]any `json:"backtest"`
+	// TrainedOnSynthetic is a POINTER, and that is load-bearing rather than tidiness.
+	//
+	// As a plain `bool` it decoded a MISSING field as `false` — so a /predict response that never
+	// mentioned synthetic training was indistinguishable from one that explicitly denied it, and
+	// gate 1 read the silence as clean. That is precisely the inversion the gate exists to prevent:
+	// its own comment says "unknown provenance is unknown, and unknown refuses", and the field it
+	// checked first could not express unknown at all.
+	//
+	// Nil now means "the record did not say", and gate 1 refuses on it exactly as it refuses on a
+	// nil `currentData`. It travels the same way through /paper/provenance and into an evidence
+	// snapshot, so the distinction survives end to end rather than being flattened at the first hop.
+	TrainedOnSynthetic *bool  `json:"trainedOnSynthetic"`
+	DataThrough        string `json:"dataThrough"` // last bar the model was trained through
+	Reason             string `json:"reason"`
 
 	// Provenance of the frame /predict actually scored. NIL means the frame was never fetched
 	// (an early return), which the synthetic gate treats as unknown — not as clean.
