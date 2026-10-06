@@ -44,6 +44,7 @@ from .store import (
     load_record,
     load_version_record,
     save_candidate,
+    synthetic_flag,
     was_model_deployed,
 )
 from .strategy import COST_BPS, EXECUTION_CONTRACT_VERSION, default_strategy_version
@@ -97,15 +98,28 @@ def _backtest_summary(report: dict) -> dict:
 
 
 def _meta(record: dict | None) -> dict:
+    """The model identity block served on every /predict branch.
+
+    ``trainedOnSynthetic`` IS A TRI-STATE AND IS NEVER DEFAULTED. It used to be
+    ``record.get("trainedOnSynthetic", False)``, and the no-record branch returned a hard ``False`` —
+    so a record that never stated its training provenance, and even the case where there is NO MODEL
+    AT ALL, both told every consumer "this was trained on real data". The paper engine's gate 1
+    believed it, which is the exact inversion that gate exists to prevent: its own comment says
+    "unknown provenance is unknown, and unknown refuses".
+
+    ``None`` now means the question was not answered, and it travels as JSON ``null`` all the way to
+    the paper engine, ``/paper/provenance`` and the experiment evidence snapshot. See
+    ``store.synthetic_flag``.
+    """
     if not record:
         return {"modelVersion": None, "trainedAt": None, "dataThrough": None,
-                "trainedOnSynthetic": False, "dataPolicy": None, "dataPolicyCurrent": False}
+                "trainedOnSynthetic": None, "dataPolicy": None, "dataPolicyCurrent": False}
     return {
         "modelVersion": record.get("modelVersion"),
         "strategyVersion": record.get("strategyVersion") or expected_strategy_version(record.get("report")),
         "trainedAt": record.get("trainedAt"),
         "dataThrough": record.get("dataThrough"),
-        "trainedOnSynthetic": record.get("trainedOnSynthetic", False),
+        "trainedOnSynthetic": synthetic_flag(record),
         "dataPolicy": record.get("dataPolicy"),
         "dataPolicyCurrent": record.get("dataPolicy") == FEATURE_FRAME_POLICY,
     }
@@ -198,12 +212,20 @@ def _promotion_gates(record: dict | None, active: dict | None = None) -> tuple[b
         record.get("ticker", ""), record.get("timeframe", ""), int(record.get("horizon", 0)),
         report, data_policy=record.get("dataPolicy"),
     )
+    # ONLY AN EXPLICIT `False` IS VERIFIED-REAL. A record that does not state its training
+    # provenance fails this gate exactly as one that states synthetic training does — promoting a
+    # model whose provenance nobody recorded is promoting an unknown.
+    candidate_synthetic = synthetic_flag(record)
     gates = [
         {
             "name": "real-training-data",
-            "passed": not bool(record.get("trainedOnSynthetic")),
-            "detail": "candidate was trained on real data" if not record.get("trainedOnSynthetic")
-            else "candidate was trained on synthetic data",
+            "passed": candidate_synthetic is False,
+            "detail": {
+                False: "candidate was trained on real data",
+                True: "candidate was trained on synthetic data",
+                None: "the candidate record does not state whether it was trained on synthetic "
+                      "data; unknown provenance is not clean provenance",
+            }[candidate_synthetic],
         },
         {
             "name": "current-data-policy",
