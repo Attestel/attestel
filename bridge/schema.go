@@ -1,6 +1,10 @@
 package main
 
-import "time"
+import (
+	"bytes"
+	"encoding/json"
+	"time"
+)
 
 // schema.go — the versioned wire contract, restated on the worker side.
 //
@@ -79,9 +83,84 @@ type Job struct {
 }
 
 type claimResponse struct {
-	Claimed bool   `json:"claimed"`
-	Reason  string `json:"reason"`
-	Job     *Job   `json:"job"`
+	Claimed bool    `json:"claimed"`
+	Reason  string  `json:"reason"`
+	Job     *rawJob `json:"job"`
+}
+
+// rawJob is a claimed envelope BEFORE this bridge has decided which kind it is.
+//
+// WHY THE INDIRECTION. Two workflows means two job shapes, and the shape has to be chosen by the
+// WORKFLOW NAME rather than by which fields happen to be populated. Decoding straight into `Job`
+// and checking afterwards for a `snapshotId` would let a server steer this bridge into the review
+// path by adding a field to a research job; decoding into a struct with every field of both would
+// make each kind's strict decode meaningless.
+//
+// So the envelope is held as raw bytes, `workflow()` reads the ONE field that decides, and the
+// bytes are then decoded into the corresponding closed struct with unknown fields REFUSED — the
+// same treatment `decodeStage` gives a stage's stdout, and for the same reason: what arrives over
+// this boundary is untrusted.
+type rawJob struct {
+	raw       json.RawMessage
+	workflow_ string
+}
+
+func (r *rawJob) UnmarshalJSON(b []byte) error {
+	r.raw = append(json.RawMessage(nil), b...)
+	var probe struct {
+		WorkflowVersion string `json:"workflowVersion"`
+	}
+	if err := json.Unmarshal(b, &probe); err != nil {
+		return err
+	}
+	r.workflow_ = probe.WorkflowVersion
+	return nil
+}
+
+// workflow returns the claimed job's workflow name, or "" when nothing was claimed.
+func (r *rawJob) workflow() string {
+	if r == nil {
+		return ""
+	}
+	return r.workflow_
+}
+
+// asResearch decodes the envelope as a company-research job, refusing unknown fields.
+func (r *rawJob) asResearch() (*Job, error) {
+	if r == nil {
+		return nil, errf("the server claimed a job but sent none")
+	}
+	var job Job
+	if err := decodeStrict(r.raw, &job); err != nil {
+		return nil, errf("the research job envelope does not match this bridge's schema: %v", err)
+	}
+	if err := job.validate(); err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+// asReview decodes the envelope as an experiment-review job, refusing unknown fields.
+func (r *rawJob) asReview() (*ReviewJob, error) {
+	if r == nil {
+		return nil, errf("the server claimed a review but sent none")
+	}
+	var job ReviewJob
+	if err := decodeStrict(r.raw, &job); err != nil {
+		return nil, errf("the review job envelope does not match this bridge's schema: %v", err)
+	}
+	if err := job.validate(); err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+// decodeStrict decodes into a CLOSED struct: a field the schema does not declare is a refusal
+// rather than a silently carried value.
+func decodeStrict(raw json.RawMessage, target any) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	return dec.Decode(target)
 }
 
 // ───────────────────────────────────────────────────────────────────────────────── the artifact

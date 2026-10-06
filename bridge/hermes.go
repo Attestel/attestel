@@ -92,6 +92,62 @@ var companyResearchChain = []stageSpec{
 	{Profile: "stock-chair", Toolsets: "web", MaxTurns: 12, PromptFile: "stock-chair.md"},
 }
 
+// experimentReviewChain is THE mapping for `experiment_review_v1`. Same versioned-contract rule as
+// above: changing it changes what the workflow means.
+//
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// NONE OF THESE STAGES READS THE OPEN WEB, AND `-t todo` IS HOW THAT IS ENFORCED
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// A review analyses ONE document: the evidence snapshot this deployment assembled from its own
+// services, handed to the stage inside its query file. There is nothing on the internet it needs
+// and nothing it should be able to reach — a reviewer that can browse is a reviewer that can be
+// told what to conclude by a page.
+//
+// `-t` takes a comma-separated toolset list, and an EMPTY value means "whatever the local config
+// allows" (hermes_test.go already refuses that for the research chain). So the narrowest honest
+// declaration is a single inert toolset: `todo` is task planning and nothing else. Naming it
+// structurally excludes `web`, `browser`, `terminal`, `file` and `code_execution` — the review
+// stages cannot fetch, cannot shell out and cannot read the disk, because those toolsets were never
+// enabled for the session.
+//
+// `forbiddenReviewToolsets` below is the assertion that keeps it that way under future edits.
+var experimentReviewChain = []stageSpec{
+	{Profile: "experiment-auditor", Toolsets: "todo", MaxTurns: 8, PromptFile: "experiment-auditor.md"},
+	{Profile: "evidence-skeptic", Toolsets: "todo", MaxTurns: 8, PromptFile: "evidence-skeptic.md"},
+	{Profile: "experiment-chair", Toolsets: "todo", MaxTurns: 8, PromptFile: "experiment-chair.md"},
+}
+
+// forbiddenReviewToolsets may never appear in a review stage's toolset list. Every one of them
+// grants either NETWORK ACCESS or LOCAL EXECUTION, and a review needs neither: its entire input is
+// the snapshot in its query file.
+//
+// Checked at construction time in addition to simply not being written, so a future edit that adds
+// one fails a test rather than shipping — the same defence `forbiddenFlags` provides for argv.
+var forbiddenReviewToolsets = []string{
+	"web", "browser", "terminal", "file", "code_execution", "computer_use", "memory",
+}
+
+// reviewToolsetViolation returns the offending toolset in a review stage's list, or "".
+//
+// `memory` is on the list and is worth a sentence: it grants no network and no shell, but it reads
+// and writes local Hermes state that OUTLIVES the run. A reviewer that can be influenced by what a
+// previous review wrote is a reviewer whose conclusions depend on history the snapshot does not
+// contain, which defeats the point of freezing evidence at all.
+func reviewToolsetViolation(spec stageSpec) string {
+	if strings.TrimSpace(spec.Toolsets) == "" {
+		return "(empty)"
+	}
+	for _, name := range strings.Split(spec.Toolsets, ",") {
+		name = strings.ToLower(strings.TrimSpace(name))
+		for _, bad := range forbiddenReviewToolsets {
+			if name == bad {
+				return bad
+			}
+		}
+	}
+	return ""
+}
+
 // profileNames is the chain's profile list, in order, for the artifact's identity block. The server
 // checks it against its own copy (journal/agency.go::agencyProfileChain).
 func profileNames() []string {
@@ -133,6 +189,18 @@ type execRunner struct{}
 //     voluntarily is not a bound;
 //  4. stdout is capped, so a runaway stage cannot exhaust memory on the way to being killed.
 func (execRunner) Run(ctx context.Context, spec stageSpec, workdir, queryPath string, cfg Config) (string, error) {
+	// THE TOOLSET GUARD RUNS FIRST, before anything touches the filesystem or PATH.
+	//
+	// A review stage that names `web` or `terminal` is a DEFINITION error — the chain in this file
+	// is wrong — and it must be reported as one. Resolving the wrapper first would report a missing
+	// binary instead, sending whoever made the edit off to create a profile when the real problem
+	// is the line they just wrote.
+	if isReviewStage(spec.Profile) {
+		if bad := reviewToolsetViolation(spec); bad != "" {
+			return "", errf("refusing to run review stage %s with the %s toolset; a review reads "+
+				"only the snapshot it was given", spec.Profile, bad)
+		}
+	}
 	bin, err := resolveProfileBinary(spec.Profile)
 	if err != nil {
 		return "", err
@@ -345,4 +413,14 @@ func environWithout(env []string, names ...string) []string {
 		out = append(out, entry)
 	}
 	return out
+}
+
+// isReviewStage reports whether a profile belongs to the review chain.
+func isReviewStage(profile string) bool {
+	for _, spec := range experimentReviewChain {
+		if spec.Profile == profile {
+			return true
+		}
+	}
+	return false
 }
