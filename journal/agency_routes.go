@@ -27,9 +27,9 @@ import (
 // credential lives on a laptop, and `AUTH_SECRET` is the key that signs session cookies —
 // paper/auth.go::systemCookie shows how few lines it takes to mint a session for any uid from it.
 // A worker token that could be turned into a session for an arbitrary user is a worker token whose
-// compromise is an account compromise. So this lane has its own secret, it grants exactly the five
-// worker routes below — status, claim, heartbeat, complete and fail — and it can mint nothing. It
-// authorises no browser route, no other service, and no session.
+// compromise is an account compromise. So this lane has its own secret, it grants exactly the seven
+// worker routes below — status, claim, heartbeat, complete, fail, snapshot and complete-review —
+// and it can mint nothing. It authorises no browser route, no other service, and no session.
 //
 // FAIL CLOSED ON MISSING CONFIGURATION. With no AGENCY_WORKER_TOKEN the worker routes answer 403
 // NAMING the missing variable — not 200, and not an open route. With an empty AGENCY_OWNER_UIDS
@@ -37,9 +37,10 @@ import (
 // both mean that an unconfigured deployment has this lane switched OFF rather than switched open.
 //
 // NO GENERIC REMOTE-COMMAND API LIVES HERE. `POST /agency/runs` accepts a workflow name, a ticker
-// and a question. There is no field for a profile, a toolset, a model, a provider, a path, a shell
-// command or a system prompt, and `agencyCreateRequest` is decoded with DisallowUnknownFields so
-// adding one to the payload is a 400 rather than a silently ignored key.
+// and a question; `POST /agency/reviews` accepts a workflow name and a stored snapshot id. Neither
+// has a field for a profile, a toolset, a model, a provider, a path, a shell command or a system
+// prompt, and both are decoded with DisallowUnknownFields so adding one to the payload is a 400
+// rather than a silently ignored key.
 
 func init() {
 	registerSubscriptionRoute(func(s *Server, mux *http.ServeMux) {
@@ -48,6 +49,19 @@ func init() {
 		mux.HandleFunc("GET /agency/runs", s.requireAuth(s.handleAgencyList))
 		mux.HandleFunc("GET /agency/runs/{id}", s.requireAuth(s.handleAgencyGet))
 		mux.HandleFunc("POST /agency/runs/{id}/cancel", s.requireAuth(s.handleAgencyCancel))
+
+		// The experiment-review lane (experiment_snapshot.go, experiment_review.go). Owner-only,
+		// on the same allowlist.
+		//
+		// `POST /experiments/snapshots` is the ONE route here that reaches an upstream, and it
+		// reaches only the paper service, only over GET (paper_client.go). It cannot cause a model
+		// call anywhere: it freezes evidence and returns. `POST /agency/reviews` writes a queued row
+		// and returns; the Hermes invocation happens later, on the owner's own machine, only because
+		// a local worker chose to claim it.
+		mux.HandleFunc("POST /experiments/snapshots", s.requireAuth(s.handleSnapshotCreate))
+		mux.HandleFunc("GET /experiments/snapshots", s.requireAuth(s.handleSnapshotList))
+		mux.HandleFunc("GET /experiments/snapshots/{id}", s.requireAuth(s.handleSnapshotGet))
+		mux.HandleFunc("POST /agency/reviews", s.requireAuth(s.handleReviewCreate))
 
 		// Worker surface. Not proxied by the gateway under any prefix.
 		//
@@ -60,6 +74,15 @@ func init() {
 		mux.HandleFunc("POST /_internal/agency/runs/{id}/heartbeat", s.handleAgencyHeartbeat)
 		mux.HandleFunc("POST /_internal/agency/runs/{id}/complete", s.handleAgencyComplete)
 		mux.HandleFunc("POST /_internal/agency/runs/{id}/fail", s.handleAgencyFail)
+
+		// The review lane's two worker routes.
+		//
+		// `snapshot` is a READ, and it is LEASE-SCOPED: a worker may read the snapshot attached to a
+		// run it currently holds, and nothing else. There is no route that serves a snapshot by id
+		// alone, so holding the worker credential does not let a worker enumerate the owner's
+		// evidence — it lets it read the evidence for the job it was given.
+		mux.HandleFunc("GET /_internal/agency/runs/{id}/snapshot", s.handleAgencyWorkerSnapshot)
+		mux.HandleFunc("POST /_internal/agency/runs/{id}/complete-review", s.handleAgencyCompleteReview)
 	})
 }
 
@@ -169,8 +192,10 @@ func (s *Server) handleAgencyList(w http.ResponseWriter, r *http.Request) {
 	views := make([]agencyRunView, 0, len(runs))
 	for _, run := range runs {
 		// The list omits artifacts: a listing of twenty-five 256 KiB documents is a download, not a
-		// list. The detail route serves the artifact.
+		// list. The detail route serves them. Both kinds are stripped — a review is the same size
+		// problem as a research artifact, and forgetting the second one is how the fix half-works.
 		run.Artifact = nil
+		run.Review = nil
 		views = append(views, agencyView(run))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -286,11 +311,19 @@ func (s *Server) handleAgencyWorkerStatus(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":                    true,
-		"workflows":             []string{agencyWorkflowCompanyResearch},
-		"jobSchemaVersion":      agencyJobSchemaVersion,
-		"artifactSchemaVersion": agencyArtifactSchemaVersion,
-		"queuedRuns":            queued,
+		"ok": true,
+		// Both registered workflows. An OLDER BRIDGE IS UNAFFECTED: it checks that the list
+		// CONTAINS `company_research_v1` and declares only that on claim, so it keeps working and is
+		// never handed a review — `handleAgencyClaim` only dispatches what the worker declared.
+		"workflows": agencyWorkflowNames(),
+		// The research pair keeps its existing key names, byte for byte, because the shipped bridge
+		// pins them. The review pair is served under its own keys rather than by changing what these
+		// two mean.
+		"jobSchemaVersion":            agencyJobSchemaVersion,
+		"artifactSchemaVersion":       agencyArtifactSchemaVersion,
+		"reviewJobSchemaVersion":      agencyReviewJobSchemaVersion,
+		"reviewArtifactSchemaVersion": agencyReviewArtifactSchemaVersion,
+		"queuedRuns":                  queued,
 		// Served so a bridge can warn the operator that its configured lease will be clamped,
 		// rather than discovering it as a surprise mid-run.
 		"maxLeaseSeconds": int(agencyMaxLeaseDuration / time.Second),
@@ -322,12 +355,21 @@ func (s *Server) handleAgencyClaim(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	// The worker must declare that it can run this workflow. An empty list is a worker that named
-	// nothing, and it gets nothing — fail closed.
-	if !containsString(req.Workflows, agencyWorkflowCompanyResearch) {
+	// The worker must declare at least one workflow this server dispatches, and it is only ever
+	// handed one it declared. An empty list is a worker that named nothing, and it gets nothing —
+	// fail closed. A worker built before the review lane existed declares only
+	// `company_research_v1` and therefore can never be given a review to run.
+	declared := make([]string, 0, len(req.Workflows))
+	for _, name := range req.Workflows {
+		if _, ok := lookupAgencyWorkflow(name); ok {
+			declared = append(declared, name)
+		}
+	}
+	if len(declared) == 0 {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"claimed": false,
-			"reason":  "this worker did not declare support for " + agencyWorkflowCompanyResearch,
+			"reason": "this worker declared no workflow this server dispatches (" +
+				strings.Join(agencyWorkflowNames(), ", ") + ")",
 		})
 		return
 	}
@@ -343,7 +385,7 @@ func (s *Server) handleAgencyClaim(w http.ResponseWriter, r *http.Request) {
 		workerID = workerID[:64]
 	}
 
-	run, ok, err := s.agency.Claim(workerID, lease, time.Now().UTC())
+	run, ok, err := s.agency.Claim(workerID, declared, lease, time.Now().UTC())
 	if err != nil {
 		log.Printf("agency: claim failed: %s", redactAgencyText(err.Error()))
 		writeJSON(w, http.StatusInternalServerError, map[string]any{
@@ -359,22 +401,28 @@ func (s *Server) handleAgencyClaim(w http.ResponseWriter, r *http.Request) {
 
 	// The JOB envelope. Note what it carries and what it does not: a workflow NAME, a subject and a
 	// cutoff. No prompt, no profile, no toolset, no model, no path, no command.
-	writeJSON(w, http.StatusOK, map[string]any{
-		"claimed": true,
-		"job": map[string]any{
-			"schemaVersion":   agencyJobSchemaVersion,
-			"runId":           run.ID,
-			"userId":          run.UserID,
-			"workflowVersion": run.WorkflowVersion,
-			"ticker":          run.Ticker,
-			"question":        run.Question,
-			"asOf":            run.AsOf,
-			"attempt":         run.Attempts,
-			"maxAttempts":     agencyMaxAttempts,
-			"leaseToken":      run.LeaseToken,
-			"leaseExpiresAt":  run.LeaseExpiresAt,
-		},
-	})
+	//
+	// A REVIEW JOB'S SUBJECT IS A SNAPSHOT ID — a reference to evidence this server assembled from
+	// its own services. It is not a URL the worker fetches from the open internet and not a path;
+	// it is redeemed against one lease-scoped route on this same deployment.
+	job := map[string]any{
+		"schemaVersion":   run.SchemaVersion,
+		"runId":           run.ID,
+		"userId":          run.UserID,
+		"workflowVersion": run.WorkflowVersion,
+		"asOf":            run.AsOf,
+		"attempt":         run.Attempts,
+		"maxAttempts":     agencyMaxAttempts,
+		"leaseToken":      run.LeaseToken,
+		"leaseExpiresAt":  run.LeaseExpiresAt,
+	}
+	if run.isReview() {
+		job["snapshotId"] = run.SnapshotID
+	} else {
+		job["ticker"] = run.Ticker
+		job["question"] = run.Question
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"claimed": true, "job": job})
 }
 
 // agencyWorkerRef is the common addressing block on every post-claim worker call: which user's run,
@@ -405,8 +453,12 @@ func (s *Server) handleAgencyHeartbeat(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	// A bounded vocabulary check against the union of every registered chain. The per-run check —
+	// "is this stage part of THIS run's workflow" — happens in the store, which is the only place
+	// that knows which run it is. Both exist so a worker can never write free text into a record
+	// the owner reads.
 	stage := strings.TrimSpace(req.Stage)
-	if stage != "" && !containsString(agencyProfileChain, stage) {
+	if stage != "" && !agencyKnownStage(stage) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{
 			"error": "stage must be one of the workflow's profiles",
 		})

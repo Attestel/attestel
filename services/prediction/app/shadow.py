@@ -18,7 +18,7 @@ from .config import ALPHAVANTAGE_API_KEY, EARNINGS_CACHE_DIR
 from .context import fetch_context, load_earnings
 from .features import FEATURE_FRAME_POLICY, MODEL_FEATURES, fetch_feature_frame, latest_feature_row
 from .model import derive_direction, predict_prob
-from .store import load_version_model
+from .store import load_version_model, synthetic_flag
 
 
 class ShadowDeferred(Exception):
@@ -41,8 +41,16 @@ def _score_version(ticker: str, timeframe: str, horizon: int, version: str, row)
     model, _calibrator, record = load_version_model(ticker, timeframe, horizon, version)
     if model is None or not isinstance(record, dict):
         raise ShadowInvalid(f"model version {version} is unavailable")
-    if record.get("trainedOnSynthetic"):
-        raise ShadowInvalid(f"model version {version} was trained on synthetic data")
+    # `is not False` rather than a truthiness test: a record that does not STATE its training
+    # provenance is refused too. Shadow evidence exists to inform a promotion review, and evidence
+    # from a model whose provenance nobody recorded cannot inform one.
+    trained_synthetic = synthetic_flag(record)
+    if trained_synthetic is not False:
+        raise ShadowInvalid(
+            f"model version {version} was trained on synthetic data"
+            if trained_synthetic
+            else f"model version {version} does not state whether it was trained on synthetic data"
+        )
     if record.get("dataPolicy") != FEATURE_FRAME_POLICY:
         raise ShadowInvalid(f"model version {version} does not use {FEATURE_FRAME_POLICY}")
     report = record.get("report") if isinstance(record.get("report"), dict) else {}

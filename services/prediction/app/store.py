@@ -75,6 +75,31 @@ def _new_model_version(now: datetime) -> str:
     return f"m{now.strftime('%Y%m%dT%H%M%S')}-{uuid4().hex[:12]}"
 
 
+def synthetic_flag(record: dict | None) -> bool | None:
+    """Whether this model record was trained on synthetic data — as a TRI-STATE.
+
+    ``True``  the record says it was.
+    ``False`` the record says it was NOT. This is the only value that means *verified real*.
+    ``None``  the record DOES NOT SAY. Unknown provenance, and unknown is not clean.
+
+    WHY THIS IS NOT ``record.get("trainedOnSynthetic", False)``. That default silently converted a
+    missing field into an explicit denial, and every consumer downstream — ``/predict``'s payload,
+    the promotion gate, the shadow scorer, and through them the paper engine's gate 1 — read the
+    silence as proof the model was trained on real data. A record written by ``save_model_version``
+    always carries the flag, so the hole only opened for records that predate it or were written by
+    hand: exactly the records least likely to have been trained on anything anybody verified.
+
+    Every caller must therefore compare against ``False`` explicitly. ``if not synthetic_flag(r)``
+    is the same bug in a new place, because ``None`` is falsy.
+    """
+    if not isinstance(record, dict):
+        return None
+    value = record.get("trainedOnSynthetic")
+    if value is None:
+        return None
+    return bool(value)
+
+
 def _ensure_legacy_file_is_versioned(ticker: str, timeframe: str, horizon: int) -> None:
     """Import the pre-registry file pair before a promotion can overwrite its compatibility copy."""
     if _active_file_version(ticker, timeframe, horizon):

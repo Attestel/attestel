@@ -69,3 +69,65 @@ func loadPromptTemplate(cfg Config, name string) (string, error) {
 	}
 	return string(raw), nil
 }
+
+// renderReviewPrompt builds one review stage's query file.
+//
+// FOUR SUBSTITUTIONS, ALL OF THEM LOCAL FACTS OR THE FROZEN SNAPSHOT. There is no owner-typed free
+// text anywhere in a review — the job carries a snapshot id and nothing else — so the untrusted
+// region here is the SNAPSHOT itself, and it is marked as data for the same reason a fetched page
+// is: it is a document, and a document is never an instruction.
+//
+// The snapshot is genuinely lower-risk than a web page (this deployment assembled it from its own
+// services), but treating it as trusted would mean a compromised paper service could write
+// instructions into a `detail` string and have a stage follow them. The delimiters cost nothing.
+func renderReviewPrompt(cfg Config, spec stageSpec, job *ReviewJob, snap *ExperimentSnapshot, evidence string, facts []string) (string, error) {
+	tpl, err := loadPromptTemplate(cfg, spec.PromptFile)
+	if err != nil {
+		return "", err
+	}
+	priorFacts := strings.TrimSpace(strings.Join(facts, "\n"))
+	if priorFacts == "" {
+		priorFacts = "(none — you are the first stage in this workflow)"
+	}
+	out := tpl
+	out = strings.ReplaceAll(out, "{{SNAPSHOT_ID}}", snap.ID)
+	out = strings.ReplaceAll(out, "{{GENERATION}}", itoa64(snap.Generation))
+	out = strings.ReplaceAll(out, "{{CUTOFF}}", snap.AsOf)
+	out = strings.ReplaceAll(out, "{{REVISION}}", snap.Revision)
+	out = strings.ReplaceAll(out, "{{PAPER_STATUS}}", snap.Derived.PaperStatus)
+	out = strings.ReplaceAll(out, "{{CANDIDATE_STATUS}}", snap.Derived.CandidateStatus)
+	out = strings.ReplaceAll(out, "{{OPERATIONAL_STATUS}}", snap.Derived.OperationalStatus)
+	out = strings.ReplaceAll(out, "{{EVIDENCE}}", evidence)
+	out = strings.ReplaceAll(out, "{{PRIOR_FACTS}}", priorFacts)
+	// The run id is never substituted into a prompt: a stage has no use for it and it is one more
+	// identifier that would end up in a model's context for no reason.
+	_ = job
+	return out, nil
+}
+
+// itoa64 renders an int64 without importing strconv into this zero-dependency module's prompt path.
+func itoa64(n int64) string {
+	if n >= 0 && n <= 1<<31-1 {
+		return itoa(int(n))
+	}
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	var buf [24]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if i == len(buf) {
+		i--
+		buf[i] = '0'
+	}
+	if neg {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
+}

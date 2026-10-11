@@ -116,19 +116,21 @@ type portfolioComparison struct {
 }
 
 type comparison struct {
-	Config             string         `json:"config"`
-	Ticker             string         `json:"ticker"`
-	Timeframe          string         `json:"timeframe"`
-	Horizon            int            `json:"horizon"`
-	ModelVersion       string         `json:"modelVersion"`
-	StrategyVersion    string         `json:"strategyVersion"`
-	Live               liveStats      `json:"live"`
-	Backtest           *backtestStats `json:"backtest"`
-	TrainedOnSynthetic bool           `json:"trainedOnSynthetic"`
-	NOpen              int            `json:"nOpen"`
-	Divergence         bool           `json:"divergence"`
-	Meaningful         bool           `json:"meaningful"`
-	Note               string         `json:"note"`
+	Config          string         `json:"config"`
+	Ticker          string         `json:"ticker"`
+	Timeframe       string         `json:"timeframe"`
+	Horizon         int            `json:"horizon"`
+	ModelVersion    string         `json:"modelVersion"`
+	StrategyVersion string         `json:"strategyVersion"`
+	Live            liveStats      `json:"live"`
+	Backtest        *backtestStats `json:"backtest"`
+	// Nil means the model record did not state its training provenance — which is not the same as
+	// stating it was not synthetic. See predictResp.TrainedOnSynthetic.
+	TrainedOnSynthetic *bool  `json:"trainedOnSynthetic"`
+	NOpen              int    `json:"nOpen"`
+	Divergence         bool   `json:"divergence"`
+	Meaningful         bool   `json:"meaningful"`
+	Note               string `json:"note"`
 	// The like-for-like comparison (contract §5.4): the simulated book's daily portfolio statistics
 	// against the evaluator's portfolio Sharpe when it is served, and against the model backtest's
 	// annualized Sharpe — caveat intact — when it is not.

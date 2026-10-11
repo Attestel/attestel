@@ -6,6 +6,7 @@ import { useToast } from "./ui/index.js";
 import { Tag } from "./terminal/bits.jsx";
 import { cx } from "../lib/cx.js";
 import { Icon } from "./shell/icons.jsx";
+import ExperimentReviewPanel from "./ExperimentReviewPanel.jsx";
 
 // PaperTradingPanel — the monitoring surface for the ACTUAL experiment
 // (docs/PAPER_EXECUTION_CONTRACT.md).
@@ -847,6 +848,13 @@ export default function PaperTradingPanel() {
           </p>
         </div>
       )}
+
+      {/* ---- "Explain this snapshot with Hermes" (ExperimentReviewPanel.jsx) ----
+
+          IT IS INERT UNTIL CLICKED. The 30-second `POLL_MS` refresh above does not reach any state
+          inside it, and the component itself has no effect, no interval and no timer. Freezing the
+          evidence and queuing a review both happen on a click and nowhere else. */}
+      <ExperimentReviewPanel />
     </section>
   );
 }

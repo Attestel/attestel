@@ -16,7 +16,11 @@ type Config struct {
 	// Phase 3. The canonical event store, read ONLY for the store-backed relationship view that
 	// event-impact reviews join against. The journal never writes to it and never fetches a
 	// provider through it — the events service refuses to fetch on a read path.
-	EventsURL      string
+	EventsURL string
+	// PaperURL is the paper-trading validation service, read ONLY to assemble an experiment
+	// evidence snapshot (paper_client.go). The journal issues nothing but GETs against it and has
+	// no method that could reach `/paper/reset` or `/paper/config`.
+	PaperURL       string
 	TradesDir      string
 	DatabaseURL    string
 	DatabaseSchema string
@@ -57,6 +61,7 @@ func loadConfig() Config {
 		GatewayURL:     strings.TrimRight(env("GATEWAY_URL", "http://localhost:8080"), "/"),
 		LLMURL:         strings.TrimRight(env("LLM_URL", "http://localhost:8002"), "/"),
 		EventsURL:      strings.TrimRight(env("EVENTS_URL", "http://localhost:8004"), "/"),
+		PaperURL:       strings.TrimRight(env("PAPER_URL", "http://localhost:8097"), "/"),
 		TradesDir:      env("TRADES_DIR", "./data/journal"),
 		DatabaseURL:    env("JOURNAL_DATABASE_URL", env("DATABASE_URL", "")),
 		DatabaseSchema: env("JOURNAL_DATABASE_SCHEMA", "journal"),

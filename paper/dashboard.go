@@ -65,6 +65,11 @@ func (a *API) handleExperiments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"paper": true, "simulation": true, "current": current, "archived": archived,
 		"storage": storage, "asOf": a.currentTime().Format(time.RFC3339), "note": note,
+		// Top-level, alongside `current.generation`, so every payload an evidence snapshot composes
+		// states its generation in the SAME place and a mismatch is a comparison rather than a
+		// special case per endpoint.
+		"generation": ledger.Generation(),
+		"revision":   a.cfg.Revision,
 	})
 }
 
@@ -231,6 +236,7 @@ func (a *API) dashboardPayload(ctx context.Context, asOf time.Time, seriesLimit 
 		"asOf":       asOf.UTC().Format(time.RFC3339),
 		"contract":   "paper-dashboard-v2",
 		"generation": startGeneration,
+		"revision":   a.cfg.Revision,
 		"experiment": map[string]any{
 			"officialStartedAt": startedAt,
 			"officialConfigs":   ledgerPayload["officialConfigs"],

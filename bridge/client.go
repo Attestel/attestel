@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // client.go — the ONE place this bridge talks to the network on the hosted side.
@@ -25,16 +26,77 @@ import (
 
 const maxResponseBytes = 1 << 20 // 1 MiB; every response in this protocol is small JSON
 
+// The addressing headers for the lease-scoped snapshot read. KEEP IN STEP WITH
+// journal/experiment_routes.go's copies — a mismatch is a 400 with no obvious cause.
+const (
+	agencyUserHeader  = "X-Agency-User-Id"
+	agencyLeaseHeader = "X-Agency-Lease-Token"
+)
+
 // hostedClient is the seam the tests drive. `*apiClient` is the only production implementation;
 // the interface exists so `run()` and `drainQueue()` can be exercised against a fake that returns
 // an auth failure, a transport failure or a stale lease on demand. Those are precisely the paths
 // that must produce a non-zero exit, and they are unreachable from a test that needs a real server.
 type hostedClient interface {
 	Status(ctx context.Context) (workerStatus, error)
-	Claim(ctx context.Context, cfg Config) (*Job, bool, error)
-	Heartbeat(ctx context.Context, job *Job, stage string, cfg Config) error
+	Claim(ctx context.Context, cfg Config) (*claimedJob, bool, error)
+	Heartbeat(ctx context.Context, ref jobRef, stage string, cfg Config) error
 	Complete(ctx context.Context, job *Job, artifact *Artifact) error
-	Fail(ctx context.Context, job *Job, reason string, retryable bool) error
+	Fail(ctx context.Context, ref jobRef, reason string, retryable bool) error
+
+	// The review lane. `Snapshot` is a READ — it takes no lease, extends none, and changes nothing
+	// — and it is the ONLY method on this interface that fetches a document. Note its parameters:
+	// a run id and a lease. There is no URL argument anywhere in this interface, so a compromised
+	// server cannot direct this worker at an address of its choosing.
+	Snapshot(ctx context.Context, job *ReviewJob) (*ExperimentSnapshot, error)
+	CompleteReview(ctx context.Context, job *ReviewJob, review *ExperimentReviewArtifact) error
+}
+
+// jobRef is the addressing block every post-claim call needs: whose run, which run, and the lease
+// that proves we still hold it. Both job kinds reduce to it, so `Heartbeat` and `Fail` are written
+// once rather than twice.
+type jobRef struct {
+	RunID      string
+	UserID     string
+	LeaseToken string
+}
+
+func (j *Job) ref() jobRef {
+	return jobRef{RunID: j.RunID, UserID: j.UserID, LeaseToken: j.LeaseToken}
+}
+
+func (j *ReviewJob) ref() jobRef {
+	return jobRef{RunID: j.RunID, UserID: j.UserID, LeaseToken: j.LeaseToken}
+}
+
+// claimedJob is what one claim produced: EXACTLY ONE of the two job kinds, never both and never
+// neither. `runOnce` switches on which one is set, so a server that returned an envelope this
+// bridge does not recognise produces a refusal rather than a half-understood run.
+type claimedJob struct {
+	Research *Job
+	Review   *ReviewJob
+}
+
+func (c *claimedJob) ref() jobRef {
+	if c.Review != nil {
+		return c.Review.ref()
+	}
+	if c.Research != nil {
+		return c.Research.ref()
+	}
+	return jobRef{}
+}
+
+// workflowVersion names which workflow was claimed, for logging and for the heartbeat's stage
+// validation.
+func (c *claimedJob) workflowVersion() string {
+	if c.Review != nil {
+		return c.Review.WorkflowVersion
+	}
+	if c.Research != nil {
+		return c.Research.WorkflowVersion
+	}
+	return ""
 }
 
 var _ hostedClient = (*apiClient)(nil)
@@ -52,6 +114,17 @@ type workerStatus struct {
 	// silence the fail-closed rule below exists to reject.
 	QueuedRuns      *int `json:"queuedRuns"`
 	MaxLeaseSeconds *int `json:"maxLeaseSeconds"`
+
+	// The review lane's schema pair. OPTIONAL, and deliberately so: a deployment that predates the
+	// review workflow states neither, and this bridge must still be able to run research against
+	// it. They are checked only when the server actually offers `experiment_review_v1`.
+	ReviewJobSchemaVersion      string `json:"reviewJobSchemaVersion"`
+	ReviewArtifactSchemaVersion string `json:"reviewArtifactSchemaVersion"`
+}
+
+// offersReview reports whether the hosted deployment dispatches the review workflow.
+func (s workerStatus) offersReview() bool {
+	return containsString(s.Workflows, workflowExperimentReview)
 }
 
 type apiClient struct {
@@ -120,13 +193,18 @@ func (c *apiClient) post(ctx context.Context, path string, payload any, out any)
 
 // get issues a read-only request. Only `Status` uses it: everything else in this protocol changes
 // state and is a POST.
-func (c *apiClient) get(ctx context.Context, path string, out any) error {
+func (c *apiClient) get(ctx context.Context, path string, out any, headers ...map[string]string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {
 		return errf("cannot build the request: %v", err)
 	}
 	req.Header.Set("X-Worker-Token", c.token)
 	req.Header.Set("User-Agent", bridgeVersion)
+	for _, set := range headers {
+		for k, v := range set {
+			req.Header.Set(k, v)
+		}
+	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -184,6 +262,20 @@ func (c *apiClient) Status(ctx context.Context) (workerStatus, error) {
 	if !containsString(out.Workflows, workflowCompanyResearch) {
 		return out, errf("the hosted deployment does not offer %q", workflowCompanyResearch)
 	}
+	// The review pair is checked ONLY when the deployment says it runs reviews. A server that does
+	// not offer the workflow is not required to state its schemas, and demanding them would make
+	// this bridge refuse to talk to a perfectly good older deployment — the fail-closed rule is
+	// about not guessing, not about rejecting what does not exist.
+	if out.offersReview() {
+		if out.ReviewJobSchemaVersion != reviewJobSchemaVersion {
+			return out, errf("the hosted deployment issues %q review jobs; this bridge understands %q",
+				out.ReviewJobSchemaVersion, reviewJobSchemaVersion)
+		}
+		if out.ReviewArtifactSchemaVersion != reviewArtifactSchemaVersion {
+			return out, errf("the hosted deployment expects %q reviews; this bridge produces %q",
+				out.ReviewArtifactSchemaVersion, reviewArtifactSchemaVersion)
+		}
+	}
 	if out.MaxLeaseSeconds == nil || *out.MaxLeaseSeconds <= 0 {
 		return out, errf("the hosted deployment did not state a usable lease ceiling")
 	}
@@ -202,11 +294,13 @@ func (c *apiClient) Status(ctx context.Context) (workerStatus, error) {
 // The claim DECLARES this worker's allowlist. The server refuses to hand back anything not on it,
 // and `Job.validate` refuses again on receipt — two checks on the same fact, on both sides of a
 // trust boundary, because this is the boundary that decides what runs on the owner's machine.
-func (c *apiClient) Claim(ctx context.Context, cfg Config) (*Job, bool, error) {
+func (c *apiClient) Claim(ctx context.Context, cfg Config) (*claimedJob, bool, error) {
 	var res claimResponse
 	err := c.post(ctx, "/_internal/agency/claim", map[string]any{
-		"workerId":     cfg.WorkerID,
-		"workflows":    []string{workflowCompanyResearch},
+		"workerId": cfg.WorkerID,
+		// BOTH workflows this bridge implements, and nothing else. The server hands back only what
+		// was declared here, and the envelope that comes back is validated again below.
+		"workflows":    workerWorkflows(),
 		"leaseSeconds": cfg.LeaseSeconds,
 	}, &res)
 	if err != nil {
@@ -215,21 +309,80 @@ func (c *apiClient) Claim(ctx context.Context, cfg Config) (*Job, bool, error) {
 	if !res.Claimed {
 		return nil, false, nil
 	}
-	if err := res.Job.validate(); err != nil {
-		return nil, false, err
+
+	// WHICH KIND CAME BACK IS DECIDED BY THE WORKFLOW NAME, not by which fields happen to be
+	// populated. Sniffing for a `snapshotId` would mean a server could steer this bridge into the
+	// review path by adding a field to a research job.
+	switch res.Job.workflow() {
+	case workflowCompanyResearch:
+		job, err := res.Job.asResearch()
+		if err != nil {
+			return nil, false, err
+		}
+		return &claimedJob{Research: job}, true, nil
+	case workflowExperimentReview:
+		job, err := res.Job.asReview()
+		if err != nil {
+			return nil, false, err
+		}
+		return &claimedJob{Review: job}, true, nil
+	default:
+		return nil, false, errf("the server dispatched workflow %q, which is not on this bridge's "+
+			"allowlist (%s)", res.Job.workflow(), strings.Join(workerWorkflows(), ", "))
 	}
-	return res.Job, true, nil
+}
+
+// workerWorkflows is this bridge's own allowlist, declared on every claim.
+func workerWorkflows() []string {
+	return []string{workflowCompanyResearch, workflowExperimentReview}
 }
 
 // Heartbeat extends the lease and reports which stage is running. A failed heartbeat is fatal to
 // the run in progress: if we cannot prove we still hold the lease, continuing would mean spending
 // the owner's machine on work that can no longer be delivered.
-func (c *apiClient) Heartbeat(ctx context.Context, job *Job, stage string, cfg Config) error {
-	return c.post(ctx, "/_internal/agency/runs/"+job.RunID+"/heartbeat", map[string]any{
-		"userId":       job.UserID,
-		"leaseToken":   job.LeaseToken,
+func (c *apiClient) Heartbeat(ctx context.Context, ref jobRef, stage string, cfg Config) error {
+	return c.post(ctx, "/_internal/agency/runs/"+ref.RunID+"/heartbeat", map[string]any{
+		"userId":       ref.UserID,
+		"leaseToken":   ref.LeaseToken,
 		"stage":        stage,
 		"leaseSeconds": cfg.LeaseSeconds,
+	}, nil)
+}
+
+// Snapshot reads the evidence this review is about.
+//
+// IT IS A READ, and it is the only fetch in this program. The path is built from a CONSTANT and the
+// run id — never from a value the server supplied — and the lease rides in the query string because
+// this is a GET. A lapsed lease reads nothing: the server checks it holds before answering.
+func (c *apiClient) Snapshot(ctx context.Context, job *ReviewJob) (*ExperimentSnapshot, error) {
+	var res struct {
+		Snapshot *ExperimentSnapshot `json:"snapshot"`
+	}
+	// THE LEASE RIDES IN HEADERS, NOT IN THE QUERY STRING. A lease token is a bearer credential for
+	// one run, and a query string is the part of a request that every reverse proxy, load balancer
+	// and access log writes to disk by default. `X-Worker-Token` travels as a header for exactly
+	// that reason; so does this.
+	headers := map[string]string{
+		agencyUserHeader:  job.UserID,
+		agencyLeaseHeader: job.LeaseToken,
+	}
+	path := "/_internal/agency/runs/" + job.RunID + "/snapshot"
+	if err := c.get(ctx, path, &res, headers); err != nil {
+		return nil, err
+	}
+	if err := res.Snapshot.validate(job); err != nil {
+		return nil, err
+	}
+	return res.Snapshot, nil
+}
+
+// CompleteReview uploads the validated review. Same 409 semantics as `Complete`: a lost lease means
+// another attempt owns the run and our result is discarded rather than retried.
+func (c *apiClient) CompleteReview(ctx context.Context, job *ReviewJob, review *ExperimentReviewArtifact) error {
+	return c.post(ctx, "/_internal/agency/runs/"+job.RunID+"/complete-review", map[string]any{
+		"userId":     job.UserID,
+		"leaseToken": job.LeaseToken,
+		"review":     review,
 	}, nil)
 }
 
@@ -247,10 +400,10 @@ func (c *apiClient) Complete(ctx context.Context, job *Job, artifact *Artifact) 
 // Fail reports why a run did not produce an artifact. The reason is redacted twice — once by `errf`
 // where it was constructed and once here — because this is the string that ends up on a record the
 // owner reads in a browser.
-func (c *apiClient) Fail(ctx context.Context, job *Job, reason string, retryable bool) error {
-	return c.post(ctx, "/_internal/agency/runs/"+job.RunID+"/fail", map[string]any{
-		"userId":     job.UserID,
-		"leaseToken": job.LeaseToken,
+func (c *apiClient) Fail(ctx context.Context, ref jobRef, reason string, retryable bool) error {
+	return c.post(ctx, "/_internal/agency/runs/"+ref.RunID+"/fail", map[string]any{
+		"userId":     ref.UserID,
+		"leaseToken": ref.LeaseToken,
 		"error":      redact(reason),
 		"retryable":  retryable,
 	}, nil)

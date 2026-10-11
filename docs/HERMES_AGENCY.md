@@ -553,7 +553,234 @@ kill. It expires terminally after three attempts.
 
 ---
 
-## 9. Tests
+## 9. `experiment_review_v1` — the experiment reviewer
+
+A **second workflow in the same lane**, on the same two credentials, the same lease protocol and the
+same bridge. It answers one question: *what state is my own paper experiment actually in?*
+
+It reviews a **frozen snapshot of this deployment's own state**. It reads no web, takes no ticker and
+no question, and produces a review whose schema has no field for a signal, a direction, a target, a
+probability or a position.
+
+> `company_research_v1` is **unchanged**. Its four profiles, its chain order, its job schema
+> (`attestel.agency.job/1`) and its artifact schema (`attestel.agency.artifact/1`) are byte-identical
+> to what they were before this workflow existed. A bridge built against the old server keeps
+> working, declares only `company_research_v1` on claim, and is therefore never handed a review.
+
+### 9.1 The evidence snapshot
+
+Pressing the button composes five live payloads under **one server-assigned `asOf`** and stores the
+result immutably:
+
+| Source | Endpoint |
+|---|---|
+| readiness | `GET /paper/readiness` |
+| dashboard | `GET /paper/dashboard?days=30` |
+| experiments | `GET /paper/experiments` |
+| status | `GET /paper/status` |
+| provenance | `GET /paper/provenance` — **new**: model identity + the evaluator verdict, as structured fields |
+
+`/paper/provenance` exists because the facts it serves were previously unreachable as data:
+`/paper/status` carries `modelVersion` and `strategyVersion` **only inside an open position's
+block** — and no position is open — while `/paper/readiness` flattens the evaluator verdict into a
+human sentence. A consumer that has to parse English to learn whether the served model was trained
+on synthetic data is a consumer that will eventually parse it wrong.
+
+**Three source states, never collapsed:**
+
+- `unavailable` — could not be read. The reason is recorded and **no payload is stored**.
+- `stale` — answered, but its own timestamp trails the snapshot's cutoff by more than 10 minutes.
+  The payload is kept; the state says it is not current.
+- `live` — answered, current. **A zero in this state is a measured zero** and is recorded as one.
+
+**There is no fallback path.** `journal/paper_client.go` has no cached copy, no previous snapshot and
+no file to fall back to — it has one method and that method issues `GET`. Stale local state cannot be
+substituted for live state because there is no code that could do it.
+
+**Mixed generations are refused.** Every payload now states its `generation`. If two readable sources
+disagree, assembly fails with `409 mixed_generation` and **nothing is stored** — the evidence would
+straddle a reset, and a record nobody can interpret is worse than no record. Retry.
+
+The snapshot id is a **content address** (`exs_` + `sha256(...)[:24]`), so re-snapshotting identical
+state returns the same id and writes nothing.
+
+### 9.2 The three statuses — computed by the server, not by the model
+
+`journal/experiment_snapshot.go` derives all three from the stored bytes, and
+`validateExperimentReview` **rejects any review whose values differ**.
+
+| | question | vocabulary |
+|---|---|---|
+| `paperStatus` | Has the paper experiment produced a measured result? | `unjudged` · `collecting` · `measurable` |
+| `candidateStatus` | What did the offline evaluator establish about the candidate strategy? | `edge` · `no_edge` · `inconclusive` · `unknown` |
+| `operationalStatus` | Can this deployment keep honest score right now? | `verified` · `degraded` · `unavailable` |
+
+**The first two are different questions and the UI renders them apart.** `unjudged` means the paper
+experiment has not been measured — a fact about the clock, not about the strategy. `no_edge` means
+the evaluator ran with an adequate sample and found no edge — a real, negative result about the
+strategy, which says nothing about whether the paper experiment has run. Today's deployment is
+`unjudged` **and** `no_edge` simultaneously, which is exactly the pair that gets conflated.
+
+The evaluator's four verdicts map as: `EDGE` → `edge` (only when the verdict is also `current` and
+`evidenceCurrent`, i.e. spendable — the three conditions `paper/gates.go`'s fourth gate requires),
+`NO EDGE` → `no_edge`, `INCONCLUSIVE` → `inconclusive`, and **`SUSPECT` → `inconclusive` plus a hard
+blocker**. `SUSPECT` is the evaluator's worst verdict (a pooled Sharpe high enough to indicate
+leakage), but what it establishes is that the *measurement* cannot be believed — not that there is no
+edge. Reporting it as `no_edge` would claim a result nobody produced.
+
+**Precedence is least-established-wins**: any missing verdict makes the aggregate `unknown`. Missing
+information never becomes a value.
+
+**Provenance outranks the verdict.** A model trained on synthetic data — or one that never states
+whether it was — makes any verdict beside it uninterpretable: it characterises invented prices, not
+the market. So the candidate falls to `unknown` even when a real `NO EDGE` was recorded, the verdict
+survives as a blocker, and the snapshot carries a note saying *why* a verdict that was read produced
+`unknown`. Without that note the state is indistinguishable from "the evaluator never ran", and a
+reader would draw the wrong conclusion from the same three fields.
+
+**A missing `trainedOnSynthetic` field is `null`, not `false` — fixed at the source.** The default
+lived in `services/prediction/app/main.py::_meta()`, which served
+`record.get("trainedOnSynthetic", False)` and returned a hard `False` on the no-record branch. So
+silence read as a denial from the very first hop, and a model of unknown training provenance passed
+gate 1 as verified-clean. `store.synthetic_flag()` is now the single tri-state reader; only an
+explicit `False` means verified-real, and that rule is applied identically by `/predict`, the
+promotion gate and the shadow scorer. The value travels as `null` through `paper/clients.go`,
+`/paper/provenance` and into the snapshot, where it raises the unknown-provenance blocker.
+
+`journal/experiment_provenance_integration_test.go` runs the **real paper binary** against a fake
+`/predict` that omits the field, and follows it across all three services in one test — because each
+service's own fixtures stated the field, so each was individually correct about a case that never
+occurred in it.
+
+### 9.3 What Hermes contributes, and what it cannot
+
+The server also derives a **mandatory blocker set** — `synthetic-trained-model`,
+`no-evaluator-verdict`, `verdict-not-edge`, `verdict-suspect`, `evidence-not-current`,
+`strategy-version-mismatch`, `source-unavailable`, `source-stale`, `integrity-degraded`,
+`store-desync`, `clock-not-started`, `mixed-revision` and the rest. The bridge merges every one of
+them into the artifact before upload, and the server rejects a review that omits one.
+
+So the chain **cannot**:
+
+- create or manufacture an `EDGE` verdict — the statuses are copied from the snapshot, and no stage
+  schema (`auditorOutput`, `skepticOutput`, `reviewChairOutput`) has a field for one;
+- drop a blocker the evidence compels;
+- change a threshold, an evaluator parameter, a model, or the experiment clock;
+- train, promote or roll back a model;
+- write to the paper ledger — `journal/paper_client.go` can issue nothing but `GET`;
+- read `unavailable` as zero;
+- cite a field the snapshot does not contain — every `evidencePaths` entry is checked against the
+  snapshot's real path index, and an invented path **fails the run**.
+
+What it does contribute is the part no rule can compute: why a blocker matters, what is honestly
+unknown, which pieces of evidence contradict each other, and what to check next.
+
+### 9.4 The chain
+
+```
+experiment-auditor  →  evidence-skeptic  →  experiment-chair
+```
+
+- **`experiment-auditor`** — operational, integrity and readiness blockers.
+- **`evidence-skeptic`** — separates *missing evidence* (never measured), *insufficient sample*
+  (measured, cannot decide) and *negative evidence* (measured, the answer was no). Those are three
+  separate fields in its output schema, and `review_run.go` keeps them apart all the way through:
+  the first two become `unknowns`, the third becomes a blocker. Merging them at that seam is exactly
+  how "the paper experiment has not run" and "the strategy failed" become the same sentence.
+- **`experiment-chair`** — the concise final review and the prioritized next checks.
+
+**None of them reads the open web.** Every stage runs `-t todo` — a single inert toolset, which
+structurally excludes `web`, `browser`, `terminal`, `file` and `code_execution`. `execRunner` refuses
+to invoke a review stage naming anything wider, before it touches PATH.
+
+Create the three wrappers once, the same way as the research profiles:
+
+```bash
+hermes profile alias experiment-auditor
+hermes profile alias evidence-skeptic
+hermes profile alias experiment-chair
+```
+
+`attestel-hermes-bridge -check` reports them, and treats them as a **failure only when the hosted
+deployment actually offers `experiment_review_v1`** — a deployment that does not will never dispatch
+one, so three missing wrappers there are three profiles you had no reason to create.
+
+The hosted side needs `PAPER_URL` pointed at the paper service (set in `docker-compose.yml`; the
+journal reads it over `GET` only) and, optionally, `ATTESTEL_REVISION` so a stored snapshot can name
+the build that produced it. An unset revision serialises as the literal `"unavailable"`.
+
+### 9.5 Budgets
+
+Freezing evidence reads five live payloads, and the budgets are a **four-layer chain** in which every
+outer layer must strictly exceed the one inside it:
+
+| layer | budget | why |
+|---|---|---|
+| `/paper/readiness` | **50s** | re-evaluates every gate against live upstreams; caps itself at 45s |
+| `/paper/provenance` | **50s** | calls `/predict` once **per config**, sequentially — it is *not* a store read |
+| dashboard / experiments / status | **15s** each | genuine store reads |
+| journal assembly (`snapshotAssembleTimeout`) | **190s** | must exceed the 145s worst case |
+| gateway (`experimentSnapshotProxyTimeout`) | **215s** | |
+| nginx (`location = /api/experiments/snapshots`) | **240s** | overrides the 120s global |
+
+**Both slow sources reach live upstreams.** `/paper/provenance` was briefly given the fast budget on
+the assumption that it was a store read; with three configs it is three sequential prediction calls,
+and a 15-second ceiling would have recorded a healthy deployment's model provenance as `unavailable`.
+
+**Each layer needs its own client or config.** The journal's shared client carries a 15s
+whole-request `Timeout` and the gateway's a 130s one — and a `Timeout` on an `http.Client` is a hard
+ceiling that wins over any longer context. Proxying through either would cut the assembly off while
+the journal went on to store the snapshot the browser was just told it did not get. nginx's global
+`proxy_read_timeout` is 120s, shorter than the journal's own budget, hence the exact-match location.
+
+`TestTheSnapshotBudgetChainNests` **parses `gateway/agency.go` and `deploy/nginx.conf.template`**
+rather than comparing constants in one package, so lowering any layer fails a test.
+`TestASlowUpstreamSourceStillProducesASnapshot` makes a source take 17 real seconds and asserts it
+still comes back `live` — which fails if anybody puts provenance back on the store-read budget.
+
+**Retention never deletes evidence a live review needs.** The store keeps the newest 50 snapshots
+*plus* every snapshot pinned by a queued or running review, up to a hard ceiling of 200. Without the
+pin, a busy owner's newer snapshots would eventually evict the one a queued review was created
+against, and the worker would get a 404 for evidence queued minutes earlier — a time-dependent
+failure that would never appear until somebody was iterating quickly.
+
+### 9.6 Routes
+
+| | |
+|---|---|
+| `POST /api/experiments/snapshots` | freeze and store the evidence (201, or 200 if identical content is already stored) |
+| `GET /api/experiments/snapshots` | list, payloads stripped |
+| `GET /api/experiments/snapshots/{id}` | one stored snapshot |
+| `POST /api/agency/reviews` | queue a review — body is `{workflow, snapshotId}` and **nothing else** |
+| `GET /api/agency/runs/{id}` | follow it; the review lands in `run.review` |
+
+Worker side, both behind `AGENCY_WORKER_TOKEN` and neither proxied by the gateway:
+`GET /_internal/agency/runs/{id}/snapshot` (**lease-scoped**: a worker reads only the snapshot for a
+run it currently holds, so the credential does not let it enumerate the owner's evidence) and
+`POST /_internal/agency/runs/{id}/complete-review`.
+
+The snapshot read takes its addressing in **headers** — `X-Agency-User-Id` and
+`X-Agency-Lease-Token` — not in the query string. A lease token is a bearer credential for one run,
+and a query string is the part of a request that every reverse proxy, load balancer and access log
+writes to disk by default. It stays a `GET`: moving the credential does not make it a mutation.
+
+### 9.7 The button
+
+**Journal → Experiments → "Explain this snapshot with Hermes".**
+
+Nothing runs on page load, on the panel's existing 30-second refresh, on a ticker change or on any
+timer — `web/src/components/ExperimentReviewPanel.jsx` contains no `useEffect` at all. The click
+freezes the evidence, queues the review, then follows it with the same model-free run poll the
+research lane uses, which stops on its own at a terminal state.
+
+The panel shows Paper status, Candidate status and Operational status as **three separate labelled
+cards**, each with its own question and its own explanation, plus the snapshot timestamp, generation
+and deployment revision, and the `NO_SIGNAL / NO_ACTION` block every run view serves. A completed
+review is still `NO_SIGNAL`.
+
+---
+
+## 10. Tests
 
 Running these **writes to your machine**: the Go build and test cache (`go env GOCACHE`), the
 compiled worker binary if you build one, `web/dist/` and `web/node_modules/.vite` from the bundle,
@@ -571,8 +798,11 @@ port against a temp data directory.
 (cd gateway && go test ./...)   # proxy behaviour; the worker API is not reachable from a browser
 (cd bridge  && go test ./...)   # exit-status contract, invocation rules (source-level and
                                 # behavioural), stage schemas, credential handling, the privacy
-                                # accept/reject table, the lease invariant, and the END-TO-END runs
-(cd web     && npm run build && node --test tests/)   # the whole tests/ directory
+                                # accept/reject table, the lease invariant, the review chain's
+                                # toolset guard, and the END-TO-END runs
+(cd paper   && go test ./...)   # /paper/provenance: an unreachable upstream is `unavailable` with
+                                # a reason, never a clean-looking row of zeros
+(cd web     && npm test && npm run build)              # the whole tests/ directory, then the bundle
 ```
 
 `bridge/integration_test.go` compiles and starts the **real journal binary**, creates a run through
@@ -592,3 +822,125 @@ Three of its cases are worth knowing about:
 - **The privacy table** in `bridge/redact_test.go` and `journal/agency_test.go` is the *same* list
   of accept and reject cases, run against each module's own copy of the pattern set — so a change to
   one side that is not mirrored fails on the side that was not updated.
+
+### The review lane's own properties
+
+`journal/experiment_review_test.go` and `bridge/review_test.go` assert, one per test:
+
+- an unreachable paper service leaves every source `unavailable` with a reason, **not** `no_edge`
+  and **not** a zero — and `stale` and a measured zero remain three distinct answers;
+- two sources reporting different generations produce a `409` and **store nothing**;
+- `NO EDGE` yields `candidateStatus: no_edge` while `paperStatus` stays `unjudged`, and the
+  blocker's own words say which of the two it is about;
+- `SUSPECT` yields `inconclusive` plus a blocker, never `no_edge`;
+- a synthetic-trained model raises a blocker that no verdict beside it can outrank, and a review
+  that drops that blocker is rejected;
+- a review claiming `edge` over a `NO EDGE` snapshot is rejected, naming the derived value;
+- a review citing a snapshot field that does not exist is rejected;
+- unknown fields, unsupported workflows and a `prompt` / `toolsets` / `profile` key on the create
+  body are all `400`;
+- a worker declaring only `company_research_v1` is never handed a review, and the review job it
+  would have received carries **no ticker and no question**;
+- the worker snapshot route is lease-scoped: the current lease reads it, any other lease gets `409`;
+- `journal/paper_client.go` contains no `POST`/`PUT`/`PATCH`/`DELETE` and does not name
+  `/paper/reset` or `/paper/config` (a source-level assertion, comments stripped), and `client.go`'s
+  reachable path set is pinned exactly;
+- a mandatory blocker is matched by **code AND evidence paths**, so a review cannot answer three
+  distinct `source-unavailable` blockers with one entry, or keep a code while dropping the fields it
+  rests on;
+- the evaluator's **raw result and its validity are separate server-derived fields**, so a recorded
+  `NO EDGE` stays visible when the conclusion is `unknown`, and a worker can restate neither;
+- creating a review verifies the snapshot and enqueues the run **under one lock**, so retention
+  cannot evict the evidence between the two and orphan a review (asserted under `-race`);
+- retention keeps a snapshot a queued review still needs, releases it once that run is terminal, and
+  stays bounded even when everything is pinned;
+- the lease token is refused in the query string and required in a header;
+- the assembly budget exceeds the sum of its per-source budgets, and the snapshot lane's HTTP client
+  sets no whole-request `Timeout` that could silently clamp one;
+- a `/predict` record that never mentions `trainedOnSynthetic` stays **null** through
+  `/paper/provenance` and refuses at gate 1, rather than decoding as a clean `false`;
+- no review stage may name `web`, `browser`, `terminal`, `file`, `code_execution`, `computer_use` or
+  `memory`, and `execRunner` refuses one that does;
+- a completed review is still `NO_SIGNAL / NO_ACTION`, and the stored artifact contains no
+  `direction`, `signal`, `priceTarget`, `expectedReturn`, `probability`, `positionSize`,
+  `confidence` or `recommendation` key.
+
+`bridge/review_test.go`'s `TestOneCompleteExperimentReviewFromSnapshotToArtifact` runs the whole
+thing — real journal binary, real routes, real session cookie, real lease, real validators, a fake
+paper service serving **the state the private deployment actually reports** (a synthetic-trained
+model, a `NO EDGE` verdict, and a clock that has never started) — with only the three Hermes
+invocations stubbed.
+
+That state is worth spelling out, because it is the one every reading has to get right and the one a
+careless reading collapses:
+
+- the **paper experiment** has not been measured → `paperStatus: unjudged`;
+- the evaluator **did** return `NO EDGE`, but about a model trained on synthetic data — so it
+  characterises invented prices and establishes nothing about the real market → `candidateStatus:
+  unknown`, **not** `no_edge`, with the negative verdict preserved as a blocker and a snapshot note
+  saying exactly why a read verdict produced `unknown`;
+- both findings, plus `synthetic-trained-model` and `clock-not-started`, survive as separate
+  blockers.
+
+### The real-Hermes smoke test
+
+The stubbed end-to-end test proves the *pipeline*. It is blind to every failure only a real model
+produces: a profile that does not exist, a profile with no working model, a model that ignores the
+output contract, a model that **invents an `evidencePaths` entry rather than copying one** (the most
+likely real failure, and one no stub can reproduce), a stage that runs past its budget, or wording
+that trips the leak scan.
+
+`bridge/smoke_test.go` closes that gap. It invokes `execRunner` — the production path, no dry run —
+against a real deployment, and **refuses to run** if `ATTESTEL_BRIDGE_DRY_RUN` is set rather than
+silently reporting success for the thing it did not do.
+
+```bash
+cd bridge
+ATTESTEL_SMOKE_URL='https://<host>/svc/journal' ATTESTEL_SMOKE_COOKIE='nvda_session=<owner session cookie>' ATTESTEL_WORKER_TOKEN='<the deployment AGENCY_WORKER_TOKEN>'   go test -run TestRealHermesReviewSmoke -v -timeout 20m ./...
+```
+
+It is **skipped** unless all three are set. Prerequisites: the three review profiles exist locally
+with a working model each and are aliased, and the deployment has `PAPER_URL` configured and lists
+`experiment_review_v1` in its worker status.
+
+It writes one evidence snapshot and one completed review to the owner's own account. Both are
+read-only with respect to the experiment: the snapshot is assembled from `GET`s and the review has
+no field that could change anything. It resets nothing, trains nothing and books nothing.
+
+It asserts the three statuses match the ones the deployment derived for itself, that the review
+cites real evidence, that a real review is **not** labelled `degraded` (that label belongs to
+stubbed runs, and the two must stay distinguishable in the stored record), and that a completed real
+review is still `NO_SIGNAL / NO_ACTION` with no signal-shaped key anywhere in it.
+
+#### The local variant — real models, no deployment
+
+`TestRealHermesReviewAgainstALocalJournal` is the same real-model run **without** a hosted
+deployment. It starts the real journal binary on a loopback port with a temp data directory, points
+it at a fake paper service, mints its own session, and runs `execRunner`.
+
+```bash
+cd bridge
+ATTESTEL_LOCAL_HERMES_SMOKE=1   go test -run TestRealHermesReviewAgainstALocalJournal -v -timeout 20m ./...
+```
+
+Both exist because they answer different questions. The hosted one answers *"does this work against
+useCTL"* and needs three secrets that should not travel. This one answers *"does the real-model path
+work at all"* and needs none — so it is the one anybody can run, and the one that catches a model
+that ignores the output contract or **invents an `evidencePaths` entry rather than copying one**.
+That last failure is the most likely real one and the stub structurally cannot reproduce it: the
+stub reads its paths out of the document it was handed, so it could not invent one if it tried.
+
+It writes nothing outside a temp directory, and it spends real model calls.
+
+**Provisioning, once.** The three profiles must exist with a working model each:
+
+```bash
+hermes profile create experiment-auditor  --clone-from stock-chair
+hermes profile create evidence-skeptic    --clone-from stock-chair
+hermes profile create experiment-chair    --clone-from stock-chair
+```
+
+`hermes profile create` aliases each one by default, so the wrapper is on `PATH` immediately;
+`hermes profile list` should show all three with a model and an alias. Cloning from an existing
+profile is what gives them a configured model — a profile created from scratch has none and fails at
+the first token.

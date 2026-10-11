@@ -64,6 +64,9 @@ func (a *API) routes() http.Handler {
 	mux.HandleFunc("GET /paper/readiness", a.handleReadiness)
 	mux.HandleFunc("GET /paper/dashboard", a.handleDashboard)
 	mux.HandleFunc("GET /paper/experiments", a.handleExperiments)
+	// Which model is serving and what the evaluator said about it, as structured fields. A READ:
+	// it takes no engine lock, books nothing and cannot cause a decision (provenance.go).
+	mux.HandleFunc("GET /paper/provenance", a.handleProvenance)
 	mux.HandleFunc("GET /paper/shadow", a.handleShadow)
 	// READS are public (the frontend fails silent if this is down). The two MUTATING routes are
 	// not: /paper/reset deletes every paper trade in the journal and /paper/config rewrites what
@@ -261,6 +264,11 @@ func (a *API) statusPayload(ctx context.Context, asOf time.Time) map[string]any 
 		"configs": out, "paper": true, "book": a.bookIdentity(),
 		"asOf":   asOf.UTC().Format(time.RFC3339),
 		"sizing": a.sizing(),
+		// The experiment generation and the deployed build, served on every payload an evidence
+		// snapshot composes so a consumer can prove all of them came from ONE generation and one
+		// revision. Without it a snapshot could straddle a reset and nobody could tell.
+		"generation": a.generation(),
+		"revision":   a.cfg.Revision,
 		// The roll-up of the per-config `sync` blocks, so an operator does not have to scan them.
 		"reconciliation": map[string]any{
 			"desyncedConfigs": desynced,
@@ -389,7 +397,10 @@ func (a *API) comparisonPayload(ctx context.Context, asOf time.Time) map[string]
 			nOpen = 1
 		}
 		cmp := buildComparison(cfg, byConfig[cfg.Key()], pred, nOpen, st.LastDecision, live)
-		if cmp.TrainedOnSynthetic {
+		// UNKNOWN COUNTS AS SYNTHETIC HERE. A record that did not state its training provenance
+		// cannot be shown to be clean, and the `synthetic` flag on this payload is a warning rather
+		// than a classification — flagging an unknown is the conservative direction to be wrong in.
+		if cmp.TrainedOnSynthetic == nil || *cmp.TrainedOnSynthetic {
 			anySynthetic = true
 		}
 		comparisons = append(comparisons, cmp)

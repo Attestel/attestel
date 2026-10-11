@@ -65,6 +65,16 @@ type Config struct {
 	CookieName string
 	SystemUID  string
 
+	// Revision identifies the DEPLOYED BUILD this process is, so a stored evidence snapshot can
+	// name the code that produced it. Set it from the image tag or the commit at build/deploy time
+	// (`ATTESTEL_REVISION`, or `GIT_SHA`).
+	//
+	// AN UNSET REVISION IS THE LITERAL STRING "unavailable", NEVER "". A consumer must be able to
+	// tell "this deployment did not state its revision" from "the field is a blank it should have
+	// filled in", and an empty string reads as the second while meaning the first. `revisionUnknown`
+	// is the only value this field ever takes when nothing is configured.
+	Revision string
+
 	// Exact allow-list of browser origins, mirroring the feedback service's pattern. EMPTY BY
 	// DEFAULT, which means NO CORS headers at all: this service's reads are proxied same-origin in
 	// every shipped deployment, and `Access-Control-Allow-Origin: *` — what it used to answer — is
@@ -104,6 +114,8 @@ func loadConfig() Config {
 		MaxBarAgeSessions:   posInt(env("PAPER_MAX_BAR_AGE_SESSIONS", "3"), 3),
 		MaxModelAgeSessions: posInt(env("PAPER_MAX_MODEL_AGE_SESSIONS", "10"), 10),
 
+		Revision: env("ATTESTEL_REVISION", env("GIT_SHA", revisionUnknown)),
+
 		AuthSecret: os.Getenv("AUTH_SECRET"), // no default: an unset secret means "no credential"
 		CookieName: env("COOKIE_NAME", "nvda_session"),
 		SystemUID:  env("PAPER_SYSTEM_UID", "paper-engine"),
@@ -113,6 +125,10 @@ func loadConfig() Config {
 		CORSOrigins: splitCSV(os.Getenv("CORS_ORIGINS")),
 	}
 }
+
+// revisionUnknown is what `Revision` holds when the deployment configured none. It is a stated
+// value rather than an empty one so that "not configured" survives serialisation as its own answer.
+const revisionUnknown = "unavailable"
 
 // fastForward reports whether every tick should be counted as a new bar (demo/testing only).
 func (c Config) fastForward() bool { return c.BarSeconds > 0 }

@@ -51,6 +51,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("cannot open agency run store in %q: %v", cfg.TradesDir, err)
 	}
+	// The experiment evidence snapshots the review workflow reads (experiment_snapshot_store.go).
+	// Opened on the same terms and the same allowlist as the agency store: unconditionally, so the
+	// routes can answer honestly, and off by configuration rather than by absence.
+	snapshots, err := openExperimentSnapshotStore(cfg.TradesDir, cfg.AgencyOwnerUIDs, documents)
+	if err != nil {
+		log.Fatalf("cannot open experiment snapshot store in %q: %v", cfg.TradesDir, err)
+	}
+	// Retention must not delete the evidence a queued or running review still needs. The pin is
+	// wired here, after both stores exist, and only in this direction: the snapshot store asks the
+	// agency store, never the reverse (see the field comment on ExperimentSnapshotStore.pinned).
+	snapshots.pinned = agency.SnapshotIDsInUse
 
 	// Self-hosted, server-side product events (§6). A package-level sink rather than a Server field:
 	// every emitter is a durable-write site inside this package, and this keeps the analytics lane's
@@ -66,7 +77,9 @@ func main() {
 		portfolioReviews:   portfolioReviews,
 		documents:          documents,
 		agency:             agency,
+		snapshots:          snapshots,
 		http:               &http.Client{Timeout: 15 * time.Second},
+		paperHTTP:          newPaperClient(),
 	}
 
 	handler := withLogging(srv.routes())

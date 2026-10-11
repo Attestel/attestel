@@ -47,10 +47,12 @@ const (
 	// posture in the other direction.
 	agencyArtifactSchemaVersion = "attestel.agency.artifact/1"
 
-	// agencyWorkflowCompanyResearch is the ONLY workflow this lane knows. It is a closed vocabulary
-	// of one, deliberately: the hosted side names a workflow, never a profile, a toolset, a model, a
-	// path or a command. What `company_research_v1` means in terms of Hermes profiles is decided
+	// agencyWorkflowCompanyResearch is the research workflow. It is one entry in a CLOSED REGISTRY
+	// (agency_workflows.go) — the hosted side names a workflow, never a profile, a toolset, a model,
+	// a path or a command. What `company_research_v1` means in terms of Hermes profiles is decided
 	// entirely on the owner's machine (see bridge/hermes.go) and is not expressible over the wire.
+	// Its meaning, its chain and its two schema versions are unchanged by the addition of the review
+	// workflow beside it.
 	agencyWorkflowCompanyResearch = "company_research_v1"
 )
 
@@ -137,17 +139,11 @@ const (
 	agencyMinGroundedFraction = 0.25 // of all findings, how many must rest on a source
 )
 
-// agencyProfileChain is the FIXED, ORDERED chain `company_research_v1` means. It is recorded here
-// so the hosted side can display and verify what ran — it is NOT sent to the worker as an
-// instruction, and the worker does not take its chain from this list. The bridge owns the real
-// mapping (bridge/hermes.go) and this is the copy the server checks the returned artifact against.
-// The two must agree; agency_test.go and the bridge's own test both pin the same four strings.
-var agencyProfileChain = []string{
-	"stock-scout",
-	"stock-fundamentals",
-	"stock-risk",
-	"stock-chair",
-}
+// The FIXED, ORDERED chain each workflow means now lives in `agency_workflows.go`, so a second
+// workflow cannot be validated against the first one's rules. `agencyProfileChain` is still the
+// name for `company_research_v1`'s copy; it is recorded so the hosted side can verify what ran, it
+// is NOT sent to the worker as an instruction, and the worker takes its chain from bridge/hermes.go.
+// The two must agree; agency_test.go and the bridge's own test pin the same four strings.
 
 var (
 	agencyTickerRE = regexp.MustCompile(`^[A-Z0-9][A-Z0-9.\-]{0,15}$`)
@@ -168,6 +164,16 @@ type AgencyRun struct {
 	// a run with the same key is still live ATTACHES to it and starts nothing — the same rule
 	// gateway/analystjobs.go applies to analyst runs, for the same reason.
 	IdempotencyKey string `json:"idempotencyKey"`
+
+	// Kind says which ENVELOPE this run uses — `research` or `review` (agency_workflows.go). It is
+	// derived from the workflow at creation and never supplied by a caller, so a run cannot be
+	// completed with the other kind's artifact.
+	Kind string `json:"kind,omitempty"`
+
+	// SnapshotID is set on a REVIEW run and empty on a research one: a review is always about a
+	// stored evidence snapshot, and that snapshot is the entirety of its input. There is no field
+	// here for a prompt, a URL, a path or a command, and there must never be one.
+	SnapshotID string `json:"snapshotId,omitempty"`
 
 	Ticker   string `json:"ticker"`
 	Question string `json:"question"`
@@ -200,7 +206,14 @@ type AgencyRun struct {
 
 	Error    string          `json:"error,omitempty"`
 	Artifact *AgencyArtifact `json:"artifact,omitempty"`
+	// Review is the REVIEW kind's artifact. A separate field rather than a shared `any`, so the two
+	// artifacts cannot be confused for each other by a decoder or by a reader: a run carries at most
+	// one of them, and which one is decided by its `Kind`.
+	Review *ExperimentReviewArtifact `json:"review,omitempty"`
 }
+
+// isReview reports whether this run uses the review envelope.
+func (r AgencyRun) isReview() bool { return r.Kind == workflowKindReview }
 
 // terminal reports whether no further transition is possible.
 func (r AgencyRun) terminal() bool {
@@ -276,6 +289,12 @@ type agencyRunView struct {
 	Error           string          `json:"error,omitempty"`
 	Artifact        *AgencyArtifact `json:"artifact,omitempty"`
 
+	// The review lane's fields. Absent on a research run, so the existing view is byte-identical to
+	// what it was.
+	Kind       string                    `json:"kind,omitempty"`
+	SnapshotID string                    `json:"snapshotId,omitempty"`
+	Review     *ExperimentReviewArtifact `json:"review,omitempty"`
+
 	// Actionability is served on EVERY run, in every state, so a reader can never mistake "the
 	// research lane did not answer that question" for "there is nothing to act on". In v1 it is
 	// always NO_SIGNAL with the gate list showing exactly which evidence was never evaluated.
@@ -298,6 +317,9 @@ func agencyView(r AgencyRun) agencyRunView {
 		CreatedAt: r.CreatedAt, ClaimedAt: r.ClaimedAt, HeartbeatAt: r.HeartbeatAt,
 		FinishedAt: r.FinishedAt, LeaseExpiresAt: r.LeaseExpiresAt,
 		Error: r.Error, Artifact: r.Artifact,
+		Kind: r.Kind, SnapshotID: r.SnapshotID, Review: r.Review,
+		// SERVED ON EVERY RUN OF EVERY WORKFLOW, including a completed review. A review explains an
+		// experiment; it produces no signal, and the block below says so in every state.
 		Actionability: agencyActionability(r),
 		PollAfterMs:   agencyPollAfterMs,
 		Disclaimer:    agencyDisclaimer,
@@ -581,15 +603,22 @@ func validateAgencyArtifact(a *AgencyArtifact, run AgencyRun) error {
 	}
 
 	// --- stages ------------------------------------------------------------------------------
-	if len(a.Stages) != len(agencyProfileChain) {
+	// THE CHAIN IS THE RUN'S OWN, NOT A PACKAGE GLOBAL. A run is validated against the rules of
+	// the workflow it was created with, so a second workflow can never be judged by the first's.
+	chain := agencyChainFor(run.WorkflowVersion)
+	if len(chain) == 0 {
+		return invalidArtifact("run %q names workflow %q, which this server does not dispatch",
+			run.ID, run.WorkflowVersion)
+	}
+	if len(a.Stages) != len(chain) {
 		return invalidArtifact("artifact carries %d stages; %s runs exactly %d",
-			len(a.Stages), run.WorkflowVersion, len(agencyProfileChain))
+			len(a.Stages), run.WorkflowVersion, len(chain))
 	}
 	completed := 0
 	for i, st := range a.Stages {
-		if st.Profile != agencyProfileChain[i] {
+		if st.Profile != chain[i] {
 			return invalidArtifact("stage %d is %q; %s runs %v in that order",
-				i, st.Profile, run.WorkflowVersion, agencyProfileChain)
+				i, st.Profile, run.WorkflowVersion, chain)
 		}
 		switch st.Status {
 		case "ok":
@@ -659,14 +688,13 @@ func validateAgencyArtifact(a *AgencyArtifact, run AgencyRun) error {
 		a.Identity.WorkflowVersion != run.WorkflowVersion {
 		return invalidArtifact("identity does not restate the artifact schema and workflow versions")
 	}
-	if len(a.Identity.Profiles) != len(agencyProfileChain) {
+	if len(a.Identity.Profiles) != len(chain) {
 		return invalidArtifact("identity names %d profiles; the chain has %d",
-			len(a.Identity.Profiles), len(agencyProfileChain))
+			len(a.Identity.Profiles), len(chain))
 	}
 	for i, p := range a.Identity.Profiles {
-		if p != agencyProfileChain[i] {
-			return invalidArtifact("identity profile %d is %q; expected %q",
-				i, p, agencyProfileChain[i])
+		if p != chain[i] {
+			return invalidArtifact("identity profile %d is %q; expected %q", i, p, chain[i])
 		}
 	}
 	if a.Identity.StagesCompleted != completed {

@@ -43,6 +43,27 @@ __EXTRA_LISTEN__
     # Point the platform's READINESS probe here so traffic stops being routed to an instance that
     # cannot answer. Do NOT point liveness at it: during a database outage that would restart-loop a
     # gateway that is working perfectly well.
+    # Freezing experiment evidence is the ONE product route that can legitimately take minutes: the
+    # journal reads five live paper payloads sequentially, two of which fan out to the prediction
+    # service (journal/paper_client.go). The global `proxy_read_timeout` above is 120s, which is
+    # right for every other route and SHORTER than the journal's own 190-second assembly budget — so
+    # without this block nginx would return 504 while the journal went on to store the snapshot the
+    # browser was just told it did not get.
+    #
+    # This is the outermost link in a four-layer chain, and every layer must strictly exceed the one
+    # inside it:
+    #
+    #   sources (145s) < journal assembly (190s) < gateway (215s) < nginx (240s)
+    #
+    # journal/experiment_review_test.go::TestTheSnapshotBudgetChainNests parses THIS FILE and asserts
+    # the whole chain, so lowering this number fails a test rather than truncating an assembly in
+    # production. The exact-match `=` keeps it off every other /api/ route.
+    location = /api/experiments/snapshots {
+      proxy_pass http://127.0.0.1:8181;
+      proxy_read_timeout 240s;
+      proxy_send_timeout 240s;
+    }
+
     location /api/     { proxy_pass http://127.0.0.1:8181; }
     location = /health { proxy_pass http://127.0.0.1:8181; }
     location = /ready  { proxy_pass http://127.0.0.1:8181; }

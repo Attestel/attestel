@@ -53,7 +53,11 @@ func runOnce(ctx context.Context, cfg Config, client hostedClient, runner hermes
 	// From here on, EVERY exit path reports back. A run that stops without a report is a run that
 	// sits `running` in the owner's browser until its lease expires, which is a worse outcome than
 	// an honest failure.
-	if err := workJob(ctx, cfg, client, runner, job); err != nil {
+	//
+	// DISPATCH IS ON THE CLAIMED KIND, which `apiClient.Claim` decided from the workflow name and
+	// then decoded into a closed struct. There is no path here that infers the kind from the
+	// payload's shape.
+	if err := workClaimed(ctx, cfg, client, runner, job); err != nil {
 		if isStaleLease(err) {
 			// Not a failure to report: the lease is no longer ours, so another attempt owns this run
 			// and our result — including our failure — must not overwrite theirs.
@@ -65,7 +69,7 @@ func runOnce(ctx context.Context, cfg Config, client hostedClient, runner hermes
 		// Retryable: a transport or provider failure may succeed next time; a schema or validation
 		// failure will not. `retryableFailure` decides, and the server still applies its own attempt
 		// cap on top.
-		if ferr := client.Fail(failCtx, job, reason, retryableFailure(err)); ferr != nil {
+		if ferr := client.Fail(failCtx, job.ref(), reason, retryableFailure(err)); ferr != nil {
 			return true, errf("the run failed (%s) and the failure could not be reported: %v",
 				reason, ferr)
 		}
@@ -74,7 +78,19 @@ func runOnce(ctx context.Context, cfg Config, client hostedClient, runner hermes
 	return true, nil
 }
 
-// workJob is the workflow itself.
+// workClaimed routes one claimed job to its workflow.
+func workClaimed(ctx context.Context, cfg Config, client hostedClient, runner hermesRunner, job *claimedJob) error {
+	switch {
+	case job.Research != nil:
+		return workJob(ctx, cfg, client, runner, job.Research)
+	case job.Review != nil:
+		return workReview(ctx, cfg, client, runner, job.Review)
+	default:
+		return errf("the server claimed a job of no recognised workflow")
+	}
+}
+
+// workJob is the company-research workflow itself.
 func workJob(ctx context.Context, cfg Config, client hostedClient, runner hermesRunner, job *Job) error {
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.RunBudgetSeconds)*time.Second)
 	defer cancel()
@@ -118,7 +134,7 @@ func workJob(ctx context.Context, cfg Config, client hostedClient, runner hermes
 
 		// Prove we still hold the lease BEFORE spending a stage on it.
 		hbCtx, cancelHB := withTimeout(runCtx)
-		hbErr := client.Heartbeat(hbCtx, job, spec.Profile, cfg)
+		hbErr := client.Heartbeat(hbCtx, job.ref(), spec.Profile, cfg)
 		cancelHB()
 		if hbErr != nil {
 			return hbErr
@@ -313,6 +329,20 @@ func retryableFailure(err error) bool {
 		"ATTESTEL_HERMES_BIN_",
 		"refusing to invoke Hermes",
 		"carries instructions",
+		// The review lane's permanent refusals. A citation that does not resolve, a toolset the
+		// review chain may not use, a snapshot of the wrong schema or the wrong id, and a chair
+		// that returned no summary all produce the same answer next time — retrying only burns the
+		// attempt cap and delays the honest failure the owner needs to see.
+		"is not a field in this snapshot",
+		"refusing to run review stage",
+		"this bridge understands only",
+		"for a review of",
+		"the chair returned no summary",
+		"the chair gave no rationale",
+		"the review cites no evidence",
+		"nextChecks",
+		"the snapshot carries no sources",
+		"derived statuses are missing",
 	} {
 		if strings.Contains(msg, permanent) {
 			return false
