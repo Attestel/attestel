@@ -25,7 +25,7 @@
 # denied it. `python -m pytest` from a shell resolves to that interpreter and fails for a reason
 # unrelated to the code. Run `./.venv/bin/python -m pytest -q`.
 #
-# PIN. `pytest==9.1.1` is what produced this suite's green run at Wave 4 integration (168 passed),
+# PIN. `pytest==9.2.0` is what produced this suite's green run at Wave 4 integration (168 passed),
 # on the interpreter above. Pin to what has actually run, not to what is newest.
-pytest==9.1.1
+pytest==9.2.0
 httpx==0.28.1

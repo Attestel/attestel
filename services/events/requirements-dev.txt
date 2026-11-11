@@ -34,7 +34,7 @@
 #                 `fastapi.testclient.TestClient`, which imports it and raises without it.
 #   requests      imported directly by the provider tests; already a runtime dependency
 #
-# PIN. `pytest==9.1.1` matches the version pinned in every other service's dev file, so one
+# PIN. `pytest==9.2.0` matches the version pinned in every other service's dev file, so one
 # interpreter upgrade does not silently move four suites onto four runners.
-pytest==9.1.1
+pytest==9.2.0
 httpx==0.28.1
