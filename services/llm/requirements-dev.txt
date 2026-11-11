@@ -14,5 +14,5 @@
 # `services/prediction` have the same undeclared-test-dependency shape and no dev file. Only the
 # service whose tests were actually failing is fixed here; the pattern is deliberately not spread
 # across four services in a preflight commit.
-pytest==9.1.1
+pytest==9.2.0
 httpx==0.28.1
